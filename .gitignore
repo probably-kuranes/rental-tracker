@@ -1,0 +1,41 @@
+# Environment and secrets
+.env
+credentials.json
+token.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.venv/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Build
+build/
+dist/
+*.egg-info/
+
+# Project specific
+downloads/
+*.pdf
+*.xlsx
+rental_tracker.db
+
+# OS
+.DS_Store
+Thumbs.db

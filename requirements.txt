@@ -1,0 +1,24 @@
+# PDF and document processing
+openpyxl>=3.1.2
+
+# Database
+sqlalchemy>=2.0.0
+psycopg2-binary>=2.9.9
+alembic>=1.13.0
+
+# Gmail API
+google-api-python-client>=2.100.0
+google-auth-httplib2>=0.1.0
+google-auth-oauthlib>=1.1.0
+
+# Environment and configuration
+python-dotenv>=1.0.0
+
+# Claude API (for future LLM integration)
+anthropic>=0.39.0
+
+# Testing
+pytest>=7.4.0
+
+# Utilities
+python-dateutil>=2.8.2
