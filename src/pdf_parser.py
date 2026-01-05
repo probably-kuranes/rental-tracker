@@ -274,7 +274,18 @@ def parse_pdf(pdf_path: str) -> dict:
     # Don't forget the last owner
     if current_owner:
         results['owners'].append(current_owner)
-    
+
+    # Filter out David Mascari if there are multiple owners with duplicate data
+    # (PDFs sometimes repeat the same statement with different owner names)
+    if len(results['owners']) > 1:
+        owner_names = [o.get('owner_name', '') for o in results['owners']]
+        if 'David Mascari' in owner_names:
+            # Remove David Mascari and keep the other owner(s)
+            results['owners'] = [
+                o for o in results['owners']
+                if o.get('owner_name') != 'David Mascari'
+            ]
+
     return results
 
 

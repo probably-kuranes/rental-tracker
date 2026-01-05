@@ -117,6 +117,14 @@ class Classifier:
                     'reason': 'Known sender with statement attachment',
                     'confidence': 0.95
                 })
+
+        # Forwarded owner statements from mascari.david@gmail.com
+        if 'mascari.david@gmail.com' in sender_lower:
+            if has_attachment and 'owner statement' in subject_lower:
+                return (EmailAction.PARSE_STATEMENT, {
+                    'reason': 'Forwarded owner statement',
+                    'confidence': 0.9
+                })
         
         # Maintenance-related keywords
         maintenance_keywords = [
