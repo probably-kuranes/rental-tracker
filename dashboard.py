@@ -43,6 +43,10 @@ st.markdown("""
 @st.cache_resource
 def get_db():
     """Get database connection."""
+    import os
+    # Use sample data for Streamlit Cloud, local DB for development
+    if not os.path.exists('rental_tracker.db') and os.path.exists('sample_data.db'):
+        return Database('sqlite:///sample_data.db')
     return Database()
 
 
