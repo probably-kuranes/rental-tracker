@@ -1,16 +1,20 @@
-# Rental Property Tracker
+# 🏠 Rental Property Tracker
 
-Automated pipeline for processing rental property owner statements from Mid South Best Rentals. Monitors a Gmail inbox for incoming statements, extracts financial data from PDFs, and stores results in a PostgreSQL database.
+Automated system for monitoring rental property owner statements from Mid South Best Rentals. Fetches emails from Gmail, parses PDF statements, stores financial data, and provides interactive visualizations.
 
-## Features
+**Live Dashboard:** https://rental-tracker-ld8ugdkxncahm2kelwpmfy.streamlit.app/
 
-- Gmail integration to automatically fetch owner statement emails
-- PDF parsing to extract portfolio summaries and property-level detail
-- Structured database storage with historical tracking
-- Expense categorization (HVAC, Plumbing, Electrical, etc.)
-- Placeholder for LLM-based parsing of non-standard documents
+## ✨ Features
 
-## Architecture
+- **📧 Gmail Integration** - Automatically fetches owner statement emails
+- **📄 PDF Parsing** - Extracts financial data from Mid South Best Rentals PDFs
+- **🗄️ Database Storage** - SQLite for local dev, PostgreSQL for production
+- **📊 Interactive Dashboard** - Streamlit web app with charts and metrics
+- **☁️ Cloud Deployment** - Runs on Google Cloud Run
+- **🔍 Smart Classification** - Routes documents to appropriate parsers
+- **⚠️ Alerts** - Flags properties with high expenses or low margins
+
+## 🏗️ Architecture
 
 ```
 Gmail Inbox
@@ -19,104 +23,128 @@ Gmail Inbox
 ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
 │ Gmail Agent │ ──▶ │ Classifier  │ ──▶ │ PDF Parser  │
 └─────────────┘     └─────────────┘     └──────┬──────┘
-                           │                   │
-                           ▼                   │
-                    ┌─────────────┐            │
-                    │ LLM Parser  │            │
-                    │ (future)    │            │
-                    └──────┬──────┘            │
-                           │                   │
-                           └─────────┬─────────┘
-                                     ▼
-                              ┌─────────────┐
-                              │ Data Loader │
-                              └──────┬──────┘
-                                     ▼
-                              ┌─────────────┐
-                              │ PostgreSQL  │
-                              └─────────────┘
+                                               │
+                                               ▼
+                                        ┌─────────────┐
+                                        │ Data Loader │
+                                        └──────┬──────┘
+                                               ▼
+                                        ┌─────────────┐
+                                        │   SQLite    │
+                                        └─────────────┘
+                                               │
+                                               ▼
+                                        ┌─────────────┐
+                                        │  Streamlit  │
+                                        │  Dashboard  │
+                                        └─────────────┘
 ```
 
-## Setup
+## 🚀 Quick Start
 
 ### Prerequisites
 
-- Python 3.10+
-- PostgreSQL (or SQLite for local development)
-- Gmail account with API access enabled
-- pdftotext (from poppler-utils)
+- Python 3.9+
+- Gmail account with API access
+- Google Cloud account (for Cloud Run deployment)
+- Homebrew (macOS) for installing dependencies
 
-### Installation
+### Local Setup
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/rental-tracker.git
+git clone https://github.com/probably-kuranes/rental-tracker.git
 cd rental-tracker
-
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
 
 # Install dependencies
 pip install -r requirements.txt
 
-# Install system dependency for PDF parsing
-# Ubuntu/Debian:
-sudo apt-get install poppler-utils
-# macOS:
-brew install poppler
+# Install PDF parsing tool
+brew install poppler  # macOS
+# sudo apt-get install poppler-utils  # Ubuntu/Debian
 
-# Copy environment template and configure
+# Configure environment
 cp .env.example .env
-# Edit .env with your credentials
+# Edit .env with your settings
+
+# Set up Gmail API credentials (see Gmail Setup section)
+
+# Initialize database
+python3 src/database.py --create
+
+# Run the agent
+python3 scripts/run_agent.py --verbose
+
+# View dashboard
+streamlit run dashboard.py
 ```
 
-### Gmail API Setup
+## 📧 Gmail API Setup
 
-1. Go to Google Cloud Console (https://console.cloud.google.com)
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
 2. Create a new project
 3. Enable the Gmail API
-4. Create OAuth 2.0 credentials (Desktop application)
-5. Download credentials.json and place in project root
-6. Run `python scripts/setup_gmail.py` to authorize
+4. Go to APIs & Services → OAuth consent screen
+   - Choose "External" user type
+   - Add your email as a test user
+5. Go to APIs & Services → Credentials
+   - Create OAuth 2.0 Client ID (Desktop app)
+   - Download as `credentials.json`
+6. Authenticate:
+   ```bash
+   python3 src/gmail_agent.py --auth
+   ```
 
-### Database Setup
+## ☁️ Cloud Deployment
 
-```bash
-# Initialize database tables
-python scripts/setup_db.py
-```
-
-## Usage
-
-### Manual Run
-
-```bash
-# Process all unread owner statement emails
-python scripts/run_agent.py
-```
-
-### Scheduled Run (Linux/macOS)
-
-Add to crontab to run daily at 8am:
+### Google Cloud Run
 
 ```bash
-crontab -e
-# Add line:
-0 8 * * * cd /path/to/rental-tracker && /path/to/venv/bin/python scripts/run_agent.py
+cd /Users/davidmascari/Desktop/rental-tracker
+
+# Run deployment script
+./deploy/deploy.sh
 ```
 
-### Generate Reports
+Or manually:
 
 ```bash
-# Print summary to console
-python scripts/run_reports.py --summary
+# Set variables
+export PROJECT_ID="your-project-id"
+export REGION="us-central1"
 
-# Export to Excel
-python scripts/run_reports.py --export monthly_report.xlsx
+# Build and deploy
+gcloud builds submit --tag gcr.io/$PROJECT_ID/rental-tracker
+gcloud run jobs create rental-tracker-job \
+  --image gcr.io/$PROJECT_ID/rental-tracker \
+  --region $REGION \
+  --set-secrets=/secrets/credentials/credentials.json=gmail-credentials:latest,/secrets/token/token.json=gmail-token:latest
+
+# Run manually
+gcloud run jobs execute rental-tracker-job --region $REGION
 ```
 
-## Project Structure
+See `deploy/cloud-run-setup.md` for detailed instructions.
+
+### Streamlit Dashboard
+
+The dashboard is automatically deployed to Streamlit Cloud when you push to GitHub.
+
+**Live URL:** https://rental-tracker-ld8ugdkxncahm2kelwpmfy.streamlit.app/
+
+To redeploy:
+1. Push changes to GitHub
+2. Streamlit Cloud auto-deploys in ~2 minutes
+
+## 📊 Dashboard Features
+
+- **Portfolio Overview**: Total properties, income, expenses, NOI
+- **Property Performance**: Income, expenses, and NOI by property
+- **Expense Breakdown**: Pie charts and detailed expense lists
+- **Alerts**: Warnings for high expense ratios, low margins, high repairs
+- **Filters**: View by owner or specific property
+
+## 🗂️ Project Structure
 
 ```
 rental-tracker/
@@ -124,38 +152,175 @@ rental-tracker/
 ├── requirements.txt
 ├── .env.example
 ├── .gitignore
+├── Dockerfile                  # Container for Cloud Run
+├── entrypoint.sh              # Cloud Run startup script
+├── dashboard.py               # Streamlit dashboard
+├── sample_data.db             # Demo database for Streamlit Cloud
 ├── src/
-│   ├── __init__.py
-│   ├── gmail_agent.py      # Email fetching and attachment handling
-│   ├── pdf_parser.py       # Deterministic PDF extraction
-│   ├── llm_parser.py       # Claude API integration (placeholder)
-│   ├── classifier.py       # Routes documents to appropriate parser
-│   ├── database.py         # DB connection and table definitions
-│   ├── data_loader.py      # Writes parsed data to database
-│   └── reports.py          # Query and summarize data
+│   ├── gmail_agent.py         # Email fetching and OAuth
+│   ├── pdf_parser.py          # Mid South Best Rentals PDF parser
+│   ├── llm_parser.py          # Claude API integration (future)
+│   ├── classifier.py          # Document routing
+│   ├── database.py            # SQLAlchemy models
+│   ├── data_loader.py         # Import parsed data
+│   └── reports.py             # Console reports
 ├── scripts/
-│   ├── run_agent.py        # Main entry point
-│   ├── setup_db.py         # Initialize database
-│   └── setup_gmail.py      # Gmail OAuth flow
-└── tests/
-    ├── __init__.py
-    ├── test_parser.py
-    └── fixtures/
-        └── sample_statement.pdf
+│   └── run_agent.py           # Main entry point
+└── deploy/
+    ├── deploy.sh              # Automated Cloud Run deployment
+    └── cloud-run-setup.md     # Detailed deployment guide
 ```
 
-## Configuration
+## 💻 Usage
 
-Environment variables (set in .env):
+### Process Emails Locally
 
-| Variable | Description |
-|----------|-------------|
-| DATABASE_URL | PostgreSQL connection string |
-| GMAIL_CREDENTIALS_FILE | Path to Gmail OAuth credentials |
-| GMAIL_TOKEN_FILE | Path to store Gmail auth token |
-| GMAIL_SEARCH_QUERY | Gmail search filter for statements |
-| ANTHROPIC_API_KEY | API key for Claude (future use) |
+```bash
+# Dry run (don't modify anything)
+python3 scripts/run_agent.py --dry-run --verbose
 
-## License
+# Process for real
+python3 scripts/run_agent.py --verbose
+
+# With summary report
+python3 scripts/run_agent.py --verbose --summary
+```
+
+### Run in Google Cloud
+
+```bash
+# Execute job manually
+gcloud run jobs execute rental-tracker-job --region us-central1
+
+# View executions
+gcloud run jobs executions list --job rental-tracker-job --region us-central1
+
+# View logs
+gcloud logging read "resource.type=cloud_run_job AND resource.labels.job_name=rental-tracker-job" --limit 50
+```
+
+### View Dashboard
+
+```bash
+# Run locally
+streamlit run dashboard.py
+
+# Or visit cloud deployment
+open https://rental-tracker-ld8ugdkxncahm2kelwpmfy.streamlit.app/
+```
+
+### Query Database
+
+```bash
+# Open SQLite console
+sqlite3 rental_tracker.db
+
+# Example queries
+SELECT * FROM properties;
+SELECT * FROM monthly_reports ORDER BY period_start DESC;
+SELECT p.address, pm.total_income, pm.noi
+FROM properties p
+JOIN property_months pm ON p.id = pm.property_id;
+
+# Exit
+.quit
+```
+
+## ⚙️ Configuration
+
+Environment variables (`.env` file):
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `DATABASE_URL` | Database connection string | `sqlite:///rental_tracker.db` |
+| `GMAIL_CREDENTIALS_FILE` | Path to OAuth credentials | `credentials.json` |
+| `GMAIL_TOKEN_FILE` | Path to auth token | `token.json` |
+| `GMAIL_SEARCH_QUERY` | Gmail search filter | `(from:midsouthbestrentals.com OR from:mascari.david@gmail.com) "Owner Statement" has:attachment` |
+| `GMAIL_USER_EMAIL` | Gmail address to monitor | `mascariproperties@gmail.com` |
+| `PROCESSED_LABEL` | Label for processed emails | `RentalTracker/Processed` |
+| `ANTHROPIC_API_KEY` | Claude API key (future) | - |
+
+## 🗄️ Database Schema
+
+### Tables
+
+- **owners** - Property owners
+- **properties** - Rental properties with current rent and deposit
+- **monthly_reports** - Portfolio-level monthly summaries
+- **property_months** - Property-level monthly performance
+- **expenses** - Individual expense line items
+- **import_logs** - Track import operations
+
+## 🔐 Security
+
+- Gmail credentials stored in Google Cloud Secret Manager
+- Database file excluded from Git (`.gitignore`)
+- No sensitive data in code repository
+- OAuth tokens refreshed automatically
+
+## 💰 Cost Estimate
+
+**Google Cloud Run:**
+- < $2/month for daily runs
+- Only pay when job executes
+
+**Streamlit Cloud:**
+- Free for public repos
+
+**Total: < $2/month**
+
+## 🛠️ Troubleshooting
+
+### Gmail Authentication Fails
+
+```bash
+# Re-authenticate
+python3 src/gmail_agent.py --auth
+
+# Check credentials
+ls -la credentials.json token.json
+```
+
+### No Emails Found
+
+- Check Gmail search query in `.env`
+- Verify email has "Owner Statement" in subject
+- Check if email already has "RentalTracker/Processed" label
+
+### Cloud Run Job Fails
+
+```bash
+# View logs
+gcloud logging read "resource.type=cloud_run_job" --limit 50
+
+# Check secrets
+gcloud secrets versions list gmail-credentials
+gcloud secrets versions list gmail-token
+```
+
+### Dashboard Shows No Data
+
+- Local: Ensure `rental_tracker.db` exists
+- Cloud: Uses `sample_data.db` from repository
+
+## 🚧 Future Enhancements
+
+- [ ] Automated scheduling (GitHub Actions, Cloud Scheduler, or cron)
+- [ ] PostgreSQL for persistent cloud storage
+- [ ] Multi-month trend analysis
+- [ ] Email notifications for alerts
+- [ ] Mobile-responsive dashboard
+- [ ] Export reports to PDF/Excel
+- [ ] LLM-based parsing for non-standard documents
+
+## 📝 License
 
 MIT
+
+## 👤 Author
+
+Built for tracking 10 Memphis rental properties managed by Midsouth Homebuyers.
+
+---
+
+**Questions?** Check the deployment guide in `deploy/cloud-run-setup.md` or review the code comments.
