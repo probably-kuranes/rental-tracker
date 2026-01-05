@@ -312,6 +312,7 @@ gcloud secrets versions list gmail-token
 - [ ] Mobile-responsive dashboard
 - [ ] Export reports to PDF/Excel
 - [ ] LLM-based parsing for non-standard documents
+- [ ] Authentication and access control (password protection, OAuth, or allowlist) to restrict Streamlit dashboard to authorized users
 
 ## 📝 License
 
