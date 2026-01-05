@@ -44,10 +44,22 @@ st.markdown("""
 def get_db():
     """Get database connection."""
     import os
-    # Use sample data for Streamlit Cloud, local DB for development
-    if not os.path.exists('rental_tracker.db') and os.path.exists('sample_data.db'):
-        return Database('sqlite:///sample_data.db')
-    return Database()
+    # Determine which database to use
+    if os.path.exists('rental_tracker.db'):
+        db_url = 'sqlite:///rental_tracker.db'
+    elif os.path.exists('sample_data.db'):
+        db_url = 'sqlite:///sample_data.db'
+    else:
+        # Fallback - create empty database
+        db_url = 'sqlite:///rental_tracker.db'
+
+    db = Database(db_url)
+    # Ensure tables exist
+    try:
+        db.create_tables()
+    except:
+        pass
+    return db
 
 
 def load_data():
