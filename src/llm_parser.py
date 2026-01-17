@@ -13,8 +13,7 @@ import json
 from pathlib import Path
 from typing import Optional
 
-# Uncomment when implementing:
-# import anthropic
+import anthropic
 
 
 class LLMParserError(Exception):
@@ -51,9 +50,7 @@ class LLMParser:
                     "ANTHROPIC_API_KEY not set. "
                     "Set environment variable or pass api_key to constructor."
                 )
-            # Uncomment when implementing:
-            # self._client = anthropic.Anthropic(api_key=self.api_key)
-            raise NotImplementedError("LLM parser not yet implemented")
+            self._client = anthropic.Anthropic(api_key=self.api_key)
         return self._client
     
     def parse_document(self, pdf_path: str, context: Optional[str] = None) -> dict:
@@ -176,32 +173,97 @@ If you cannot determine a value, use null. Do not include any text outside the J
     
     def classify_email(self, sender: str, subject: str, body: str) -> dict:
         """
-        Classify an email and determine appropriate action.
-        
+        Classify an email to determine if it's a rental property report.
+
         Args:
             sender: Email sender address
             subject: Email subject line
             body: Email body text
-            
+
         Returns:
             Dictionary with:
-            - action: PARSE_STATEMENT|MAINTENANCE_REQUEST|TENANT_COMMUNICATION|etc
+            - is_rental_report: True if this is a rental property statement/report
             - confidence: 0.0 to 1.0
-            - details: Additional context
-            
+            - reason: Brief explanation of classification
+
         Raises:
-            NotImplementedError: Until this module is implemented
+            LLMParserError: If API call fails
         """
-        # TODO: Implement email classification
-        #
-        # This would allow the agent to handle varied email types:
-        # - Standard owner statements -> deterministic parser
-        # - Maintenance requests -> extract property + issue
-        # - Tenant communications -> flag for review
-        # - Lease documents -> extract terms
-        # - Unknown -> flag for manual review
-        
-        raise NotImplementedError("Email classification not yet implemented")
+        # Truncate body if too long to avoid token limits
+        max_body_length = 4000
+        truncated_body = body[:max_body_length] if len(body) > max_body_length else body
+
+        prompt = f"""Analyze this email and determine if it contains a rental property owner statement
+or rental income/expense report from a property management company.
+
+Sender: {sender}
+Subject: {subject}
+Body: {truncated_body}
+
+Respond with ONLY valid JSON (no markdown, no explanation):
+{{"is_rental_report": true/false, "confidence": 0.0-1.0, "reason": "brief explanation"}}"""
+
+        try:
+            message = self.client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=256,
+                messages=[
+                    {"role": "user", "content": prompt}
+                ]
+            )
+
+            response_text = message.content[0].text.strip()
+            return self._parse_response(response_text)
+
+        except anthropic.APIError as e:
+            raise LLMParserError(f"API call failed: {e}")
+        except Exception as e:
+            raise LLMParserError(f"Classification failed: {e}")
+
+    def generate_synopsis(self, sender: str, subject: str, body: str) -> str:
+        """
+        Generate a concise synopsis of an email.
+
+        Args:
+            sender: Email sender address
+            subject: Email subject line
+            body: Email body text
+
+        Returns:
+            30-word (or less) summary of the email content
+
+        Raises:
+            LLMParserError: If API call fails
+        """
+        # Truncate body if too long
+        max_body_length = 4000
+        truncated_body = body[:max_body_length] if len(body) > max_body_length else body
+
+        prompt = f"""Summarize this email in exactly 30 words or less. Be factual and concise.
+Focus on the key action or information being communicated.
+
+From: {sender}
+Subject: {subject}
+
+{truncated_body}
+
+Provide ONLY the summary, no quotes or explanation."""
+
+        try:
+            message = self.client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=100,
+                messages=[
+                    {"role": "user", "content": prompt}
+                ]
+            )
+
+            return message.content[0].text.strip()
+
+        except anthropic.APIError as e:
+            raise LLMParserError(f"API call failed: {e}")
+        except Exception as e:
+            raise LLMParserError(f"Synopsis generation failed: {e}")
 
 
 # CLI entry point for testing

@@ -139,6 +139,12 @@ def main():
 
     # Title
     st.title("🏠 Rental Property Tracker Dashboard")
+
+    # Add refresh button in sidebar
+    if st.sidebar.button("🔄 Refresh Data"):
+        st.cache_resource.clear()
+        st.rerun()
+
     st.markdown("---")
 
     # Load data

@@ -23,6 +23,7 @@ from googleapiclient.errors import HttpError
 SCOPES = [
     'https://www.googleapis.com/auth/gmail.readonly',
     'https://www.googleapis.com/auth/gmail.modify',  # For adding labels
+    'https://www.googleapis.com/auth/gmail.send',  # For sending digest emails
 ]
 
 
@@ -314,10 +315,10 @@ class GmailAgent:
     def fetch_email_by_id(self, message_id: str) -> Email:
         """
         Fetch a specific email by ID.
-        
+
         Args:
             message_id: Gmail message ID
-            
+
         Returns:
             Email object
         """
@@ -330,6 +331,99 @@ class GmailAgent:
             return self._parse_message(msg_data)
         except HttpError as e:
             raise RuntimeError(f"Failed to fetch email {message_id}: {e}")
+
+    def fetch_inbox_emails(self, max_results: int = 100) -> List[Email]:
+        """
+        Fetch all inbox emails WITHOUT the 'RentalTracker/Processed' label.
+
+        This fetches ALL unprocessed emails regardless of sender, not just
+        those matching the owner statement search query.
+
+        Args:
+            max_results: Maximum number of emails to fetch
+
+        Returns:
+            List of Email objects
+        """
+        # Query for all inbox emails that haven't been processed
+        query = f"in:inbox -label:{self.processed_label}"
+
+        try:
+            results = self.service.users().messages().list(
+                userId='me',
+                q=query,
+                maxResults=max_results
+            ).execute()
+
+            messages = results.get('messages', [])
+            emails = []
+
+            for msg_ref in messages:
+                msg_data = self.service.users().messages().get(
+                    userId='me',
+                    id=msg_ref['id'],
+                    format='full'
+                ).execute()
+
+                email = self._parse_message(msg_data)
+                emails.append(email)
+
+            return emails
+
+        except HttpError as e:
+            raise RuntimeError(f"Failed to fetch inbox emails: {e}")
+
+    def send_email(
+        self,
+        to: str,
+        subject: str,
+        body_html: str,
+        body_text: Optional[str] = None
+    ) -> str:
+        """
+        Send an email.
+
+        Args:
+            to: Recipient email address
+            subject: Email subject
+            body_html: HTML body content
+            body_text: Plain text body (optional, derived from HTML if not provided)
+
+        Returns:
+            Message ID of sent email
+        """
+        from email.mime.multipart import MIMEMultipart
+        from email.mime.text import MIMEText
+
+        # Create message container
+        message = MIMEMultipart('alternative')
+        message['to'] = to
+        message['subject'] = subject
+
+        # Add plain text version
+        if body_text is None:
+            # Strip HTML tags for plain text version
+            import re
+            body_text = re.sub(r'<[^>]+>', '', body_html)
+            body_text = re.sub(r'\s+', ' ', body_text).strip()
+
+        part1 = MIMEText(body_text, 'plain')
+        part2 = MIMEText(body_html, 'html')
+
+        message.attach(part1)
+        message.attach(part2)
+
+        # Encode the message
+        raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode('utf-8')
+
+        try:
+            sent_message = self.service.users().messages().send(
+                userId='me',
+                body={'raw': raw_message}
+            ).execute()
+            return sent_message['id']
+        except HttpError as e:
+            raise RuntimeError(f"Failed to send email: {e}")
 
 
 # CLI entry point for testing
