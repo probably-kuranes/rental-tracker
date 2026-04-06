@@ -119,40 +119,72 @@ class GmailAgent:
     def authenticate(self) -> Credentials:
         """
         Authenticate with Gmail API.
-        
+
+        Supports three credential sources (checked in order):
+        1. Base64-encoded env vars (GMAIL_TOKEN_B64, GMAIL_CREDENTIALS_B64) - for Railway/cloud
+        2. File paths (token_file, credentials_file) - for local development
+        3. Interactive OAuth flow - for initial setup only
+
         Returns:
             Valid credentials
-            
+
         Raises:
             FileNotFoundError: If credentials file not found
         """
         creds = None
-        
-        # Load existing token if available
-        if os.path.exists(self.token_file):
+
+        # Try loading token from base64 env var first (Railway/cloud deployment)
+        token_b64 = os.getenv('GMAIL_TOKEN_B64')
+        if token_b64:
+            token_data = base64.b64decode(token_b64)
+            creds = pickle.loads(token_data)
+        elif os.path.exists(self.token_file):
             with open(self.token_file, 'rb') as token:
                 creds = pickle.load(token)
-        
+
         # Refresh or get new credentials if needed
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
                 creds.refresh(Request())
+                # Update the base64 env var won't persist, but save to file if possible
+                self._save_token(creds)
             else:
-                if not os.path.exists(self.credentials_file):
-                    raise FileNotFoundError(
-                        f"Gmail credentials file not found: {self.credentials_file}\n"
-                        "Download from Google Cloud Console and save as credentials.json"
+                # Try loading credentials from base64 env var
+                creds_b64 = os.getenv('GMAIL_CREDENTIALS_B64')
+                if creds_b64:
+                    import json
+                    import tempfile
+                    creds_json = base64.b64decode(creds_b64)
+                    with tempfile.NamedTemporaryFile(mode='wb', suffix='.json', delete=False) as f:
+                        f.write(creds_json)
+                        tmp_creds_path = f.name
+                    try:
+                        flow = InstalledAppFlow.from_client_secrets_file(tmp_creds_path, SCOPES)
+                        creds = flow.run_local_server(port=0)
+                    finally:
+                        os.unlink(tmp_creds_path)
+                elif os.path.exists(self.credentials_file):
+                    flow = InstalledAppFlow.from_client_secrets_file(
+                        self.credentials_file, SCOPES
                     )
-                flow = InstalledAppFlow.from_client_secrets_file(
-                    self.credentials_file, SCOPES
-                )
-                creds = flow.run_local_server(port=0)
-            
-            # Save token for next run
+                    creds = flow.run_local_server(port=0)
+                else:
+                    raise FileNotFoundError(
+                        f"Gmail credentials not found. Set GMAIL_TOKEN_B64 env var "
+                        f"or provide credentials file: {self.credentials_file}"
+                    )
+
+                self._save_token(creds)
+
+        return creds
+
+    def _save_token(self, creds: Credentials) -> None:
+        """Save token to file if path is writable."""
+        try:
             with open(self.token_file, 'wb') as token:
                 pickle.dump(creds, token)
-        
-        return creds
+        except OSError:
+            pass  # File system may be read-only in cloud environments
     
     @property
     def service(self):

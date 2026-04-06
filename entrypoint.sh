@@ -1,14 +1,17 @@
 #!/bin/bash
 set -e
 
-# Copy secrets to writable locations
-echo "Copying credentials to writable locations..."
-cp /secrets/credentials/credentials.json /tmp/credentials.json
-cp /secrets/token/token.json /tmp/token.json
+# Decode base64-encoded Gmail credentials from environment variables
+# (Railway stores secrets as env vars, not mounted files)
+if [ ! -z "$GMAIL_CREDENTIALS_B64" ]; then
+    echo "$GMAIL_CREDENTIALS_B64" | base64 -d > /tmp/credentials.json
+    export GMAIL_CREDENTIALS_FILE=/tmp/credentials.json
+fi
 
-# Update environment variables to point to writable copies
-export GMAIL_CREDENTIALS_FILE=/tmp/credentials.json
-export GMAIL_TOKEN_FILE=/tmp/token.json
+if [ ! -z "$GMAIL_TOKEN_B64" ]; then
+    echo "$GMAIL_TOKEN_B64" | base64 -d > /tmp/token.json
+    export GMAIL_TOKEN_FILE=/tmp/token.json
+fi
 
 # Run the rental tracker
 echo "Starting rental tracker..."

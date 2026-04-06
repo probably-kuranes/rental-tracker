@@ -44,14 +44,15 @@ st.markdown("""
 def get_db():
     """Get database connection."""
     import os
-    # Determine which database to use
-    if os.path.exists('rental_tracker.db'):
-        db_url = 'sqlite:///rental_tracker.db'
-    elif os.path.exists('sample_data.db'):
-        db_url = 'sqlite:///sample_data.db'
-    else:
-        # Fallback - create empty database
-        db_url = 'sqlite:///rental_tracker.db'
+    # Use DATABASE_URL env var (e.g. Railway PostgreSQL), fall back to local SQLite
+    db_url = os.getenv('DATABASE_URL')
+    if not db_url:
+        if os.path.exists('rental_tracker.db'):
+            db_url = 'sqlite:///rental_tracker.db'
+        elif os.path.exists('sample_data.db'):
+            db_url = 'sqlite:///sample_data.db'
+        else:
+            db_url = 'sqlite:///rental_tracker.db'
 
     db = Database(db_url)
     # Ensure tables exist
