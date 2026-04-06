@@ -18,6 +18,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY src/ ./src/
 COPY scripts/ ./scripts/
+COPY dashboard.py ./
+COPY .streamlit/ ./.streamlit/
 COPY entrypoint.sh ./
 
 # Create directory for temporary files
@@ -27,5 +29,6 @@ RUN mkdir -p /tmp/downloads
 ENV PYTHONUNBUFFERED=1
 ENV DOWNLOAD_DIR=/tmp/downloads
 
-# Run the entrypoint script when container starts
-CMD ["./entrypoint.sh"]
+# Default CMD runs the Streamlit dashboard (web service).
+# The cron service overrides this with: ./entrypoint.sh
+CMD streamlit run dashboard.py --server.port=$PORT --server.address=0.0.0.0
