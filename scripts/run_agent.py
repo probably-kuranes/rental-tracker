@@ -110,54 +110,61 @@ def run_agent(dry_run: bool = False, verbose: bool = False) -> dict:
             continue
         
         # Process PDF attachments
+        email_had_error = False
         for pdf_attachment in email.pdf_attachments:
             log(f"  Processing attachment: {pdf_attachment.filename}")
-            
+
             # Save PDF to temp file
             with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
                 tmp.write(pdf_attachment.data)
                 tmp_path = tmp.name
-            
+
             try:
                 # Parse the PDF
                 parsed_data = classifier.parse_document(tmp_path)
-                
+
                 owners = [o.get('owner_name', 'Unknown') for o in parsed_data.get('owners', [])]
                 properties = sum(len(o.get('properties', [])) for o in parsed_data.get('owners', []))
                 log(f"  Parsed: {len(owners)} owners, {properties} properties")
-                
+
                 if not dry_run:
                     # Load into database
                     result = loader.load(parsed_data, email_id=email.id)
                     stats['properties_imported'] += result['properties_loaded']
-                    
+
                     if result['errors']:
+                        email_had_error = True
                         for err in result['errors']:
                             stats['errors'].append(f"{pdf_attachment.filename}: {err}")
-                    
+
                     log(f"  Loaded: {result['properties_loaded']} properties, "
                         f"{result['reports_skipped']} duplicates skipped")
                 else:
                     log(f"  [DRY RUN] Would load {properties} properties")
-                
+
             except Exception as e:
+                email_had_error = True
                 error_msg = f"Failed to process {pdf_attachment.filename}: {e}"
                 log(f"  ERROR: {error_msg}")
                 stats['errors'].append(error_msg)
                 continue
-            
+
             finally:
                 # Clean up temp file
                 os.unlink(tmp_path)
-        
-        # Mark email as processed
-        if not dry_run:
+
+        # Mark email as processed only if all attachments were processed without error.
+        # This prevents emails from being silently skipped on the next run after a
+        # transient failure (e.g. parser crash, missing dependency).
+        if not dry_run and not email_had_error:
             try:
                 gmail.mark_as_processed(email)
                 log(f"  Marked as processed")
             except Exception as e:
                 stats['errors'].append(f"Failed to mark email as processed: {e}")
-        
+        elif email_had_error:
+            log(f"  NOT marked as processed (will retry on next run)")
+
         stats['emails_processed'] += 1
     
     return stats
