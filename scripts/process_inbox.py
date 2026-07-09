@@ -185,6 +185,7 @@ def process_inbox(dry_run: bool = False, verbose: bool = False,
     # Process each email
     for msg in emails:
         log(f"Processing: {msg.subject[:50]}... from {msg.sender}")
+        email_had_error = False
 
         # Use LLM to classify
         try:
@@ -206,6 +207,7 @@ def process_inbox(dry_run: bool = False, verbose: bool = False,
             # Default to non-rental on classification failure
             is_rental = False
             confidence = 0.0
+            email_had_error = True
 
         if is_rental and confidence >= 0.7:
             # Process as rental report
@@ -233,6 +235,7 @@ def process_inbox(dry_run: bool = False, verbose: bool = False,
                     except Exception as e:
                         log(f"  ERROR processing PDF: {e}")
                         stats['errors'].append(f"PDF processing failed for '{pdf_attachment.filename}': {e}")
+                        email_had_error = True
 
                     finally:
                         os.unlink(tmp_path)
@@ -254,6 +257,7 @@ def process_inbox(dry_run: bool = False, verbose: bool = False,
                 log(f"  Synopsis generation failed: {e}")
                 stats['errors'].append(f"Synopsis failed for '{msg.subject}': {e}")
                 synopsis = "[Synopsis generation failed]"
+                email_had_error = True
 
             digest_entries.append(DigestEntry(
                 date=msg.date,
@@ -262,7 +266,11 @@ def process_inbox(dry_run: bool = False, verbose: bool = False,
                 synopsis=synopsis
             ))
 
-        processed_emails.append(msg)
+        # Only label emails that were fully handled; failures retry next run
+        if not email_had_error:
+            processed_emails.append(msg)
+        else:
+            log("  NOT marking as processed (will retry next run)")
 
     # Send digest email via Resend if there are non-rental emails
     if digest_entries:
