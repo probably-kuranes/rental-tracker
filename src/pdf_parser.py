@@ -80,6 +80,12 @@ def parse_dollar_amount(text: str) -> float:
         return 0.0
 
 
+def _normalize_owner_name(name: str) -> str:
+    """Normalize an owner name so account-suffix variants ("Walter Mascari - T")
+    collapse into one owner rather than fragmenting the dashboard."""
+    return re.sub(r'\s*-\s*[A-Z]{1,3}$', '', name.strip())
+
+
 def parse_portfolio_summary(text_block: str) -> dict:
     """
     Parse the portfolio summary section of an owner statement.
@@ -91,20 +97,24 @@ def parse_portfolio_summary(text_block: str) -> dict:
         Dictionary with owner info and financial metrics
     """
     data = {}
-    
-    # Extract owner name - appears on same line as OWNER STATEMENT
+
+    # Extract owner name - everything before the column gap on the
+    # OWNER STATEMENT line. Handles suffixed names like "Walter Mascari - T".
     owner_match = re.search(
-        r'^([A-Z][a-z]+ [A-Z][a-z]+)\s+OWNER STATEMENT',
+        r'^\s*(\S.*?)\s{2,}OWNER STATEMENT',
         text_block,
         re.MULTILINE
     )
     if owner_match:
-        data['owner_name'] = owner_match.group(1).strip()
+        data['owner_name'] = _normalize_owner_name(owner_match.group(1))
     else:
-        # Fallback: look for name on its own line
-        owner_match = re.search(r'^([A-Z][a-z]+ [A-Z][a-z]+)\s*$', text_block, re.MULTILINE)
-        if owner_match:
-            data['owner_name'] = owner_match.group(1).strip()
+        # Fallback: look for a name on its own line, skipping section headings
+        headings = {'Portfolio Summary', 'Unpaid Bills', 'Owner Statement',
+                    'Report Period', 'Previous Balance', 'Ending Balance'}
+        for m in re.finditer(r'^([A-Z][a-z]+ [A-Z][a-z]+)\s*$', text_block, re.MULTILINE):
+            if m.group(1).strip() not in headings:
+                data['owner_name'] = _normalize_owner_name(m.group(1))
+                break
     
     # Extract report period
     period_match = re.search(

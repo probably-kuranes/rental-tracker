@@ -197,3 +197,23 @@ class TestEdgeCases:
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
+
+
+class TestOwnerNameParsing:
+    """Regression tests for owner-name extraction from the header line."""
+
+    def test_suffixed_owner_name(self):
+        from src.pdf_parser import parse_portfolio_summary
+        block = (
+            "Walter Mascari - T                        OWNER STATEMENT\n"
+            "4123 Prytania St                          Report Period: 02/01/2026 - 02/28/2026\n"
+            "\nPortfolio Summary\n"
+        )
+        data = parse_portfolio_summary(block)
+        assert data['owner_name'] == 'Walter Mascari'
+
+    def test_fallback_skips_section_headings(self):
+        from src.pdf_parser import parse_portfolio_summary
+        block = "Portfolio Summary\n\nPatrizia Coletti\n"
+        data = parse_portfolio_summary(block)
+        assert data['owner_name'] == 'Patrizia Coletti'
