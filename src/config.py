@@ -55,7 +55,7 @@ def ANTHROPIC_API_KEY() -> str:
     return _require("ANTHROPIC_API_KEY")
 
 
-LLM_MODEL = os.getenv("LLM_MODEL", "claude-opus-4-8")
+LLM_MODEL = os.getenv("LLM_MODEL", "claude-sonnet-5")
 
 
 # --- Email delivery (Resend HTTPS API; Railway blocks outbound SMTP) --------
