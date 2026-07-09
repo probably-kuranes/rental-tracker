@@ -287,6 +287,62 @@ def main():
 
     st.markdown("---")
 
+    # Multi-month Trends
+    st.header("📈 Trends")
+
+    if not filtered_pm.empty and not data['monthly_reports'].empty:
+        pm_with_period = filtered_pm.merge(
+            data['monthly_reports'][['id', 'period_start', 'period_end']],
+            left_on='monthly_report_id',
+            right_on='id',
+            suffixes=('', '_report')
+        )
+        pm_with_period['month'] = pd.to_datetime(
+            pm_with_period['period_end']
+        ).dt.to_period('M').dt.to_timestamp()
+
+        monthly = pm_with_period.groupby('month').agg(
+            income=('total_income', 'sum'),
+            expenses=('total_expenses', 'sum'),
+            noi=('noi', 'sum'),
+        ).reset_index().sort_values('month')
+
+        if len(monthly) > 1:
+            fig_trend = go.Figure()
+            fig_trend.add_trace(go.Scatter(
+                name='Income', x=monthly['month'], y=monthly['income'],
+                mode='lines+markers', line=dict(color='#2ecc71')))
+            fig_trend.add_trace(go.Scatter(
+                name='Expenses', x=monthly['month'], y=monthly['expenses'],
+                mode='lines+markers', line=dict(color='#e74c3c')))
+            fig_trend.add_trace(go.Scatter(
+                name='NOI', x=monthly['month'], y=monthly['noi'],
+                mode='lines+markers', line=dict(color='#3498db')))
+            fig_trend.update_layout(
+                title='Income, Expenses, and NOI by Month',
+                xaxis_title='Month', yaxis_title='Amount ($)', height=400)
+            st.plotly_chart(fig_trend, use_container_width=True)
+
+            # Per-property NOI trend
+            prop_monthly = pm_with_period.merge(
+                filtered_properties[['id', 'address']],
+                left_on='property_id', right_on='id',
+                suffixes=('', '_prop')
+            ).groupby(['month', 'address'])['noi'].sum().reset_index()
+
+            fig_prop_trend = px.line(
+                prop_monthly, x='month', y='noi', color='address',
+                markers=True, title='NOI by Property Over Time',
+                labels={'month': 'Month', 'noi': 'NOI ($)', 'address': 'Property'})
+            fig_prop_trend.update_layout(height=400)
+            st.plotly_chart(fig_prop_trend, use_container_width=True)
+        else:
+            st.info("Trends will appear once more than one month of statements is imported.")
+    else:
+        st.info("No trend data available yet.")
+
+    st.markdown("---")
+
     # Expense Breakdown
     st.header("💰 Expense Breakdown")
 
@@ -369,6 +425,45 @@ def main():
             st.dataframe(alerts_df, use_container_width=True, hide_index=True)
         else:
             st.success("✅ No alerts - all properties performing well!")
+
+    st.markdown("---")
+
+    # Export
+    st.header("⬇️ Export")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if not filtered_pm.empty and not data['monthly_reports'].empty:
+            export_pm = filtered_pm.merge(
+                data['monthly_reports'][['id', 'period_start', 'period_end']],
+                left_on='monthly_report_id', right_on='id',
+                suffixes=('', '_report')
+            ).merge(
+                data['properties'][['id', 'address']],
+                left_on='property_id', right_on='id',
+                suffixes=('', '_prop')
+            )[['address', 'period_start', 'period_end', 'total_income',
+               'total_expenses', 'mgmt_fees', 'repairs', 'noi',
+               'noi_margin', 'expense_ratio']]
+            st.download_button(
+                "Property months (CSV)",
+                export_pm.to_csv(index=False).encode('utf-8'),
+                file_name=f"property_months_{datetime.now():%Y%m%d}.csv",
+                mime="text/csv",
+            )
+
+    with col2:
+        if not data['expenses'].empty and not filtered_pm.empty:
+            export_exp = data['expenses'][
+                data['expenses']['property_month_id'].isin(filtered_pm['id'])
+            ][['date', 'vendor', 'description', 'amount', 'category']]
+            st.download_button(
+                "Expense line items (CSV)",
+                export_exp.to_csv(index=False).encode('utf-8'),
+                file_name=f"expenses_{datetime.now():%Y%m%d}.csv",
+                mime="text/csv",
+            )
 
     # Footer
     st.markdown("---")

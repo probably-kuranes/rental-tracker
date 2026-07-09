@@ -1,13 +1,13 @@
 """
-LLM Parser for Non-Standard Documents
+LLM Parser
 
-Uses Claude API to extract data from documents that don't match
-the expected format for deterministic parsing.
-
-This is a PLACEHOLDER for future implementation.
+Uses the Claude API for the pieces deterministic code can't do:
+- classify_email: is an email a rental statement or not
+- generate_synopsis: one-line summary for the inbox digest
+- parse_document: extract statement data from PDFs that don't match the
+  standard Mid South Best Rentals format (fallback to pdf_parser.py)
 """
 
-import os
 import base64
 import json
 from pathlib import Path
@@ -15,183 +15,153 @@ from typing import Optional
 
 import anthropic
 
+from . import config
+
 
 class LLMParserError(Exception):
     """Raised when LLM parsing fails."""
     pass
 
 
+# Matches the output of pdf_parser.parse_pdf(), which is what
+# data_loader.DataLoader.load() expects.
+EXTRACTION_PROMPT = """Extract rental property owner-statement data from this document.
+
+Return ONLY valid JSON (no markdown fences, no commentary) with this structure:
+{
+    "owners": [
+        {
+            "owner_name": "string",
+            "period_start": "MM/DD/YYYY",
+            "period_end": "MM/DD/YYYY",
+            "previous_balance": 0.00,
+            "income": 0.00,
+            "expenses": 0.00,
+            "mgmt_fees": 0.00,
+            "total": 0.00,
+            "contributions": 0.00,
+            "draws": 0.00,
+            "ending_balance": 0.00,
+            "portfolio_minimum": 0.00,
+            "unpaid_bills_total": 0.00,
+            "due_to_owner": 0.00,
+            "properties": [
+                {
+                    "address": "string",
+                    "current_rent": 0.00,
+                    "security_deposit": 0.00,
+                    "total_income": 0.00,
+                    "total_expenses": 0.00,
+                    "mgmt_fees": 0.00,
+                    "repairs": 0.00,
+                    "noi": 0.00,
+                    "expense_details": [
+                        {"date": "MM/DD/YYYY", "vendor": "string", "comment": "string", "amount": 0.00}
+                    ]
+                }
+            ]
+        }
+    ]
+}
+
+Use 0 for financial values you cannot find. If this is not a rental owner
+statement at all, return {"owners": []}."""
+
+
 class LLMParser:
     """
-    Claude-based document parser for non-standard formats.
-    
-    Usage:
-        parser = LLMParser()
-        result = parser.parse_document(pdf_path)
+    Claude-based email classification, summarization, and document parsing.
     """
-    
-    def __init__(self, api_key: Optional[str] = None):
-        """
-        Initialize the LLM parser.
-        
-        Args:
-            api_key: Anthropic API key. If not provided, reads from
-                     ANTHROPIC_API_KEY environment variable.
-        """
-        self.api_key = api_key or os.getenv('ANTHROPIC_API_KEY')
+
+    def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
+        self.api_key = api_key
+        self.model = model or config.LLM_MODEL
         self._client = None
-    
+
     @property
     def client(self):
         """Lazy initialization of Anthropic client."""
         if self._client is None:
-            if not self.api_key:
-                raise LLMParserError(
-                    "ANTHROPIC_API_KEY not set. "
-                    "Set environment variable or pass api_key to constructor."
-                )
-            self._client = anthropic.Anthropic(api_key=self.api_key)
+            key = self.api_key or config.ANTHROPIC_API_KEY()
+            self._client = anthropic.Anthropic(api_key=key)
         return self._client
-    
+
     def parse_document(self, pdf_path: str, context: Optional[str] = None) -> dict:
         """
-        Parse a document using Claude's vision capabilities.
-        
-        Args:
-            pdf_path: Path to PDF file
-            context: Optional context about what to extract
-            
-        Returns:
-            Structured data extracted from document
-            
+        Parse a statement PDF with Claude (fallback for non-standard formats).
+
+        Returns the same structure as pdf_parser.parse_pdf() so the result
+        can be fed straight into DataLoader.load().
+
         Raises:
             LLMParserError: If parsing fails
-            NotImplementedError: Until this module is implemented
         """
-        # TODO: Implement when ready to add LLM capabilities
-        #
-        # Implementation outline:
-        # 1. Read PDF file as bytes
-        # 2. Convert to base64
-        # 3. Send to Claude with structured extraction prompt
-        # 4. Parse JSON response
-        # 5. Validate against expected schema
-        #
-        # Example implementation:
-        #
-        # path = Path(pdf_path)
-        # if not path.exists():
-        #     raise LLMParserError(f"File not found: {pdf_path}")
-        #
-        # with open(path, 'rb') as f:
-        #     pdf_bytes = f.read()
-        #
-        # pdf_base64 = base64.standard_b64encode(pdf_bytes).decode('utf-8')
-        #
-        # message = self.client.messages.create(
-        #     model="claude-sonnet-4-20250514",
-        #     max_tokens=4096,
-        #     messages=[
-        #         {
-        #             "role": "user",
-        #             "content": [
-        #                 {
-        #                     "type": "document",
-        #                     "source": {
-        #                         "type": "base64",
-        #                         "media_type": "application/pdf",
-        #                         "data": pdf_base64
-        #                     }
-        #                 },
-        #                 {
-        #                     "type": "text",
-        #                     "text": self._build_extraction_prompt(context)
-        #                 }
-        #             ]
-        #         }
-        #     ]
-        # )
-        #
-        # return self._parse_response(message.content[0].text)
-        
-        raise NotImplementedError(
-            "LLM parser not yet implemented. "
-            "Use pdf_parser.py for standard Mid South Best Rentals statements."
-        )
-    
-    def _build_extraction_prompt(self, context: Optional[str] = None) -> str:
-        """Build the extraction prompt for Claude."""
-        base_prompt = """Extract rental property data from this document.
+        path = Path(pdf_path)
+        if not path.exists():
+            raise LLMParserError(f"File not found: {pdf_path}")
 
-Return ONLY valid JSON with this structure:
-{
-    "document_type": "owner_statement|lease|maintenance_request|other",
-    "confidence": 0.0 to 1.0,
-    "owner_name": "string or null",
-    "period_start": "MM/DD/YYYY or null",
-    "period_end": "MM/DD/YYYY or null",
-    "properties": [
-        {
-            "address": "string",
-            "income": 0.00,
-            "expenses": 0.00,
-            "noi": 0.00,
-            "notes": "any relevant details"
-        }
-    ],
-    "summary": {
-        "total_income": 0.00,
-        "total_expenses": 0.00,
-        "ending_balance": 0.00
-    },
-    "raw_notes": "any other relevant information from the document"
-}
+        pdf_base64 = base64.standard_b64encode(path.read_bytes()).decode('utf-8')
 
-If you cannot determine a value, use null. Do not include any text outside the JSON."""
-        
+        prompt = EXTRACTION_PROMPT
         if context:
-            base_prompt = f"{context}\n\n{base_prompt}"
-        
-        return base_prompt
-    
+            prompt = f"{context}\n\n{prompt}"
+
+        try:
+            message = self.client.messages.create(
+                model=self.model,
+                max_tokens=16000,
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "document",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "application/pdf",
+                                "data": pdf_base64,
+                            },
+                        },
+                        {"type": "text", "text": prompt},
+                    ],
+                }],
+            )
+        except anthropic.APIError as e:
+            raise LLMParserError(f"API call failed: {e}")
+
+        result = self._parse_response(message.content[0].text)
+        result['source_file'] = str(pdf_path)
+        result.setdefault('owners', [])
+        result['document_type'] = (
+            'owner_statement' if result['owners'] else 'other'
+        )
+        result.setdefault('confidence', 0.9 if result['owners'] else 0.1)
+        return result
+
     def _parse_response(self, response_text: str) -> dict:
         """Parse and validate Claude's response."""
-        # Strip any markdown code blocks if present
         text = response_text.strip()
         if text.startswith('```'):
             text = text.split('```')[1]
             if text.startswith('json'):
                 text = text[4:]
         text = text.strip()
-        
+
         try:
-            data = json.loads(text)
+            return json.loads(text)
         except json.JSONDecodeError as e:
             raise LLMParserError(f"Failed to parse LLM response as JSON: {e}")
-        
-        return data
-    
+
     def classify_email(self, sender: str, subject: str, body: str) -> dict:
         """
         Classify an email to determine if it's a rental property report.
 
-        Args:
-            sender: Email sender address
-            subject: Email subject line
-            body: Email body text
-
-        Returns:
-            Dictionary with:
-            - is_rental_report: True if this is a rental property statement/report
-            - confidence: 0.0 to 1.0
-            - reason: Brief explanation of classification
+        Returns dict with is_rental_report, confidence, reason.
 
         Raises:
             LLMParserError: If API call fails
         """
-        # Truncate body if too long to avoid token limits
         max_body_length = 4000
-        truncated_body = body[:max_body_length] if len(body) > max_body_length else body
+        truncated_body = body[:max_body_length]
 
         prompt = f"""Analyze this email and determine if it contains a rental property owner statement
 or rental income/expense report from a property management company.
@@ -205,16 +175,11 @@ Respond with ONLY valid JSON (no markdown, no explanation):
 
         try:
             message = self.client.messages.create(
-                model="claude-sonnet-4-20250514",
+                model=self.model,
                 max_tokens=256,
-                messages=[
-                    {"role": "user", "content": prompt}
-                ]
+                messages=[{"role": "user", "content": prompt}],
             )
-
-            response_text = message.content[0].text.strip()
-            return self._parse_response(response_text)
-
+            return self._parse_response(message.content[0].text.strip())
         except anthropic.APIError as e:
             raise LLMParserError(f"API call failed: {e}")
         except Exception as e:
@@ -222,22 +187,13 @@ Respond with ONLY valid JSON (no markdown, no explanation):
 
     def generate_synopsis(self, sender: str, subject: str, body: str) -> str:
         """
-        Generate a concise synopsis of an email.
-
-        Args:
-            sender: Email sender address
-            subject: Email subject line
-            body: Email body text
-
-        Returns:
-            30-word (or less) summary of the email content
+        Generate a concise (<=30 word) synopsis of an email for the digest.
 
         Raises:
             LLMParserError: If API call fails
         """
-        # Truncate body if too long
         max_body_length = 4000
-        truncated_body = body[:max_body_length] if len(body) > max_body_length else body
+        truncated_body = body[:max_body_length]
 
         prompt = f"""Summarize this email in exactly 30 words or less. Be factual and concise.
 Focus on the key action or information being communicated.
@@ -251,15 +207,11 @@ Provide ONLY the summary, no quotes or explanation."""
 
         try:
             message = self.client.messages.create(
-                model="claude-sonnet-4-20250514",
+                model=self.model,
                 max_tokens=100,
-                messages=[
-                    {"role": "user", "content": prompt}
-                ]
+                messages=[{"role": "user", "content": prompt}],
             )
-
             return message.content[0].text.strip()
-
         except anthropic.APIError as e:
             raise LLMParserError(f"API call failed: {e}")
         except Exception as e:
@@ -268,12 +220,11 @@ Provide ONLY the summary, no quotes or explanation."""
 
 # CLI entry point for testing
 if __name__ == '__main__':
-    print("LLM Parser - Not Yet Implemented")
-    print()
-    print("This module will provide Claude-based parsing for documents")
-    print("that don't match the standard Mid South Best Rentals format.")
-    print()
-    print("To implement:")
-    print("1. Set ANTHROPIC_API_KEY environment variable")
-    print("2. Uncomment the anthropic import")
-    print("3. Implement the parse_document method")
+    import sys
+
+    if len(sys.argv) < 2:
+        print("Usage: python -m src.llm_parser <pdf_file>")
+        sys.exit(1)
+
+    parser = LLMParser()
+    print(json.dumps(parser.parse_document(sys.argv[1]), indent=2))

@@ -3,14 +3,15 @@
 Process Inbox
 
 LLM-powered email inbox processor that:
-1. Classifies emails as rental reports vs. other
+1. Classifies unprocessed inbox emails as rental reports vs. other
 2. Routes rental reports through the existing tracker pipeline
-3. Generates synopses for other emails and sends a digest
+3. Generates synopses for other emails and emails a digest via Resend
 
 Usage:
     python scripts/process_inbox.py
     python scripts/process_inbox.py --dry-run
     python scripts/process_inbox.py --verbose
+    python scripts/process_inbox.py --since 2025/01/01   # backfill window
 """
 
 import os
@@ -19,23 +20,18 @@ import argparse
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import List, Tuple
+from typing import List
 from dataclasses import dataclass
 
-# Add src to path for imports
+# Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from dotenv import load_dotenv
-load_dotenv()
-
-from src.gmail_agent import GmailAgent, Email
+from src import config, emailer
+from src.mailbox import GmailMailbox, Email
 from src.llm_parser import LLMParser, LLMParserError
 from src.classifier import Classifier
 from src.data_loader import DataLoader
 from src.database import Database
-
-
-DIGEST_RECIPIENT = "mascari.david@gmail.com"
 
 
 @dataclass
@@ -47,13 +43,25 @@ class DigestEntry:
     synopsis: str
 
 
-def build_digest_html(entries: List[DigestEntry], max_entries: int = 50) -> str:
+def build_digest_text(entries: List[DigestEntry]) -> str:
+    """Plain-text version of the digest."""
+    lines = [f"Email digest - {datetime.now().strftime('%Y-%m-%d')}",
+             f"{len(entries)} email(s) that were not rental statements:", ""]
+    for e in entries:
+        lines.append(f"- {e.date.strftime('%Y-%m-%d')}  {e.sender}")
+        lines.append(f"  {e.subject}")
+        lines.append(f"  {e.synopsis}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def build_digest_html(entries: List[DigestEntry], max_entries: int = 200) -> str:
     """
     Build HTML email body for the digest.
 
     Args:
         entries: List of DigestEntry objects
-        max_entries: Maximum entries to include in detail table (to avoid large emails)
+        max_entries: Maximum entries to include in detail table (to avoid huge emails)
 
     Returns:
         HTML string
@@ -61,7 +69,6 @@ def build_digest_html(entries: List[DigestEntry], max_entries: int = 50) -> str:
     if not entries:
         return "<p>No emails to summarize.</p>"
 
-    # Truncate if too many entries
     truncated = len(entries) > max_entries
     display_entries = entries[:max_entries] if truncated else entries
 
@@ -113,13 +120,15 @@ def build_digest_html(entries: List[DigestEntry], max_entries: int = 50) -> str:
 """
 
 
-def process_inbox(dry_run: bool = False, verbose: bool = False) -> dict:
+def process_inbox(dry_run: bool = False, verbose: bool = False,
+                  since: str = None) -> dict:
     """
-    Process all unprocessed inbox emails.
+    Process all unprocessed inbox emails in the lookback window.
 
     Args:
         dry_run: If True, don't modify anything
         verbose: If True, print detailed progress
+        since: Gmail-syntax date (YYYY/MM/DD) overriding the lookback window
 
     Returns:
         Dictionary with processing statistics
@@ -141,9 +150,10 @@ def process_inbox(dry_run: bool = False, verbose: bool = False) -> dict:
     log("Initializing...")
 
     try:
-        gmail = GmailAgent()
+        mailbox = GmailMailbox()
         llm = LLMParser()
-        classifier = Classifier(enable_llm=False)
+        enable_llm = bool(os.getenv('ANTHROPIC_API_KEY'))
+        classifier = Classifier(enable_llm=enable_llm)
         db = Database()
         loader = DataLoader(db)
     except Exception as e:
@@ -154,10 +164,11 @@ def process_inbox(dry_run: bool = False, verbose: bool = False) -> dict:
     if not dry_run:
         db.create_tables()
 
-    # Fetch all unprocessed inbox emails
-    log("Fetching unprocessed inbox emails...")
+    # Fetch all unprocessed inbox emails in the window
+    log(f"Fetching unprocessed inbox emails "
+        f"(since {since or f'{config.INBOX_LOOKBACK_DAYS} days ago'})...")
     try:
-        emails = gmail.fetch_inbox_emails()
+        emails = mailbox.fetch_inbox_emails(since=since)
         stats['emails_fetched'] = len(emails)
         log(f"Found {len(emails)} unprocessed emails")
     except Exception as e:
@@ -172,15 +183,15 @@ def process_inbox(dry_run: bool = False, verbose: bool = False) -> dict:
     processed_emails: List[Email] = []
 
     # Process each email
-    for email in emails:
-        log(f"Processing: {email.subject[:50]}... from {email.sender}")
+    for msg in emails:
+        log(f"Processing: {msg.subject[:50]}... from {msg.sender}")
 
         # Use LLM to classify
         try:
             classification = llm.classify_email(
-                sender=email.sender,
-                subject=email.subject,
-                body=email.body
+                sender=msg.sender,
+                subject=msg.subject,
+                body=msg.body
             )
             is_rental = classification.get('is_rental_report', False)
             confidence = classification.get('confidence', 0.0)
@@ -191,7 +202,7 @@ def process_inbox(dry_run: bool = False, verbose: bool = False) -> dict:
 
         except LLMParserError as e:
             log(f"  LLM classification failed: {e}")
-            stats['errors'].append(f"Classification failed for '{email.subject}': {e}")
+            stats['errors'].append(f"Classification failed for '{msg.subject}': {e}")
             # Default to non-rental on classification failure
             is_rental = False
             confidence = 0.0
@@ -200,8 +211,8 @@ def process_inbox(dry_run: bool = False, verbose: bool = False) -> dict:
             # Process as rental report
             stats['rental_reports'] += 1
 
-            if email.has_pdf_attachment:
-                for pdf_attachment in email.pdf_attachments:
+            if msg.has_pdf_attachment:
+                for pdf_attachment in msg.pdf_attachments:
                     log(f"  Processing PDF: {pdf_attachment.filename}")
 
                     with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
@@ -212,7 +223,7 @@ def process_inbox(dry_run: bool = False, verbose: bool = False) -> dict:
                         parsed_data = classifier.parse_document(tmp_path)
 
                         if not dry_run:
-                            result = loader.load(parsed_data, email_id=email.id)
+                            result = loader.load(parsed_data, email_id=msg.id)
                             stats['properties_imported'] += result['properties_loaded']
                             log(f"  Loaded {result['properties_loaded']} properties")
                         else:
@@ -233,65 +244,64 @@ def process_inbox(dry_run: bool = False, verbose: bool = False) -> dict:
 
             try:
                 synopsis = llm.generate_synopsis(
-                    sender=email.sender,
-                    subject=email.subject,
-                    body=email.body
+                    sender=msg.sender,
+                    subject=msg.subject,
+                    body=msg.body
                 )
                 log(f"  Synopsis: {synopsis[:60]}...")
 
-                digest_entries.append(DigestEntry(
-                    date=email.date,
-                    sender=email.sender,
-                    subject=email.subject,
-                    synopsis=synopsis
-                ))
-
             except LLMParserError as e:
                 log(f"  Synopsis generation failed: {e}")
-                stats['errors'].append(f"Synopsis failed for '{email.subject}': {e}")
-                # Add entry with fallback synopsis
-                digest_entries.append(DigestEntry(
-                    date=email.date,
-                    sender=email.sender,
-                    subject=email.subject,
-                    synopsis="[Synopsis generation failed]"
-                ))
+                stats['errors'].append(f"Synopsis failed for '{msg.subject}': {e}")
+                synopsis = "[Synopsis generation failed]"
 
-        processed_emails.append(email)
+            digest_entries.append(DigestEntry(
+                date=msg.date,
+                sender=msg.sender,
+                subject=msg.subject,
+                synopsis=synopsis
+            ))
 
-    # Send digest email if there are non-rental emails
+        processed_emails.append(msg)
+
+    # Send digest email via Resend if there are non-rental emails
     if digest_entries:
         log(f"Building digest with {len(digest_entries)} entries...")
         digest_html = build_digest_html(digest_entries)
+        digest_text = build_digest_text(digest_entries)
 
         if not dry_run:
             try:
-                subject = f"Email Digest - {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-                gmail.send_email(
-                    to=DIGEST_RECIPIENT,
-                    subject=subject,
-                    body_html=digest_html
+                subject = f"Rental inbox digest - {datetime.now().strftime('%Y-%m-%d')}"
+                emailer.send(
+                    config.RESEND_API_KEY(),
+                    config.EMAIL_FROM,
+                    config.EMAIL_TO,
+                    subject,
+                    digest_text,
+                    digest_html,
                 )
                 stats['digest_sent'] = True
-                log(f"Digest email sent to {DIGEST_RECIPIENT}")
+                log(f"Digest email sent to {config.EMAIL_TO}")
             except Exception as e:
                 stats['errors'].append(f"Failed to send digest: {e}")
                 log(f"ERROR sending digest: {e}")
         else:
-            log(f"[DRY RUN] Would send digest to {DIGEST_RECIPIENT}")
+            log(f"[DRY RUN] Would send digest to {config.EMAIL_TO}")
             stats['digest_sent'] = True  # Mark as "would have sent"
 
     # Mark all processed emails with the label
     if not dry_run:
         log("Marking emails as processed...")
-        for email in processed_emails:
+        for msg in processed_emails:
             try:
-                gmail.mark_as_processed(email)
+                mailbox.mark_as_processed(msg)
             except Exception as e:
                 stats['errors'].append(f"Failed to mark email as processed: {e}")
     else:
         log(f"[DRY RUN] Would mark {len(processed_emails)} emails as processed")
 
+    mailbox.close()
     return stats
 
 
@@ -309,6 +319,10 @@ def main():
         action='store_true',
         help='Print detailed progress'
     )
+    parser.add_argument(
+        '--since',
+        help='Gmail-syntax date (YYYY/MM/DD) overriding the lookback window'
+    )
 
     args = parser.parse_args()
 
@@ -319,7 +333,8 @@ def main():
         print("MODE: Dry run (no changes will be made)")
     print("=" * 60)
 
-    stats = process_inbox(dry_run=args.dry_run, verbose=args.verbose)
+    stats = process_inbox(dry_run=args.dry_run, verbose=args.verbose,
+                          since=args.since)
 
     print("\n" + "=" * 60)
     print("RESULTS")

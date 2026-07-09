@@ -141,8 +141,11 @@ class Classifier:
         if self.enable_llm:
             try:
                 result = self.llm_parser.classify_email(sender, subject, body)
-                action = EmailAction(result.get('action', 'flag_for_review').lower())
-                return (action, result)
+                if (result.get('is_rental_report')
+                        and result.get('confidence', 0) >= 0.7
+                        and has_attachment):
+                    return (EmailAction.PARSE_STATEMENT, result)
+                return (EmailAction.SKIP, result)
             except (LLMParserError, NotImplementedError):
                 pass
         

@@ -1,64 +1,59 @@
 # 🏠 Rental Property Tracker
 
-Automated system for monitoring rental property owner statements from Mid South Best Rentals. Fetches emails from Gmail, parses PDF statements, stores financial data in PostgreSQL, and provides an interactive Streamlit dashboard.
+Automated system for monitoring rental property owner statements from Mid South Best Rentals. Reads the `mascariproperties@gmail.com` mailbox over IMAP, parses PDF statements, stores financial data in PostgreSQL, serves an interactive Streamlit dashboard, and emails a daily digest of everything else that lands in the inbox.
 
 **Live Dashboard:** https://rental-tracker-web-production.up.railway.app/
 
 ## ✨ Features
 
-- **📧 Gmail Integration** - Automatically fetches owner statement emails
+- **📧 Gmail via IMAP + app password** - No OAuth tokens to expire; reads Gmail with the `X-GM-RAW` search extension so full Gmail query syntax works
 - **📄 Deterministic PDF Parsing** - Extracts financial data from Mid South Best Rentals PDFs via `pdftotext`
-- **🤖 LLM Inbox Triage** - Classifies non-statement mail with Claude and emails a digest
+- **🤖 LLM Parse Fallback** - Claude parses statements that don't match the standard format
+- **🤖 LLM Inbox Triage** - Classifies non-statement mail with Claude and emails a digest via Resend
 - **🗄️ Database Storage** - SQLite for local dev, PostgreSQL for production (Railway)
-- **📊 Interactive Dashboard** - Streamlit web app with charts and metrics
-- **☁️ Railway Deployment** - Web service + cron service + managed Postgres on a single platform
-- **🔍 Smart Classification** - Routes documents to appropriate parsers
-- **⚠️ Alerts** - Flags properties with high expenses or low margins
+- **📊 Interactive Dashboard** - Portfolio overview, per-property performance, multi-month trends, expense breakdowns, alerts, CSV export
+- **☁️ Railway Deployment** - Web service + daily cron service + managed Postgres
 
 ## 🏗️ Architecture
 
+Follows the morning-digest pattern: env-var config (`src/config.py`), IMAP/app-password mail access (no Google OAuth), and email delivery over the Resend HTTPS API (Railway blocks outbound SMTP).
+
 ```
-Gmail Inbox
+Gmail (IMAP, app password)
     │
     ▼
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│ Gmail Agent │ ──▶ │ Classifier  │ ──▶ │ PDF Parser  │
-└─────────────┘     └──────┬──────┘     └──────┬──────┘
-                           │                   │
-              non-statement│                   ▼
-                           ▼            ┌─────────────┐
-                    ┌─────────────┐     │ Data Loader │
-                    │  LLM Digest │     └──────┬──────┘
-                    │   (Claude)  │            ▼
-                    └─────────────┘     ┌─────────────┐
-                                        │  Postgres   │
-                                        └──────┬──────┘
-                                               ▼
-                                        ┌─────────────┐
-                                        │  Streamlit  │
-                                        │  Dashboard  │
-                                        └─────────────┘
+┌──────────────┐   statements   ┌─────────────┐     ┌─────────────┐
+│ mailbox.py   │ ─────────────▶ │ Classifier  │ ──▶ │ PDF Parser  │──┐
+└──────┬───────┘                └─────────────┘     │ (+LLM fall- │  │
+       │ everything else                            │  back)      │  │
+       ▼                                            └─────────────┘  ▼
+┌──────────────┐     ┌──────────────┐               ┌─────────────┐
+│  LLM Triage  │ ──▶ │ Resend email │               │ Data Loader │
+│  (Claude)    │     │   digest     │               └──────┬──────┘
+└──────────────┘     └──────────────┘                      ▼
+                                                    ┌─────────────┐
+                                                    │  Postgres   │
+                                                    └──────┬──────┘
+                                                           ▼
+                                                    ┌─────────────┐
+                                                    │  Streamlit  │
+                                                    │  Dashboard  │
+                                                    └─────────────┘
 ```
 
-Two cron-driven entry points run on Railway:
-- `scripts/run_agent.py` — fetches owner statements, parses PDFs, loads Postgres
-- `scripts/process_inbox.py` — LLM-classifies remaining inbox mail and emails a digest of anything that isn't a recognized statement
+The daily Railway cron runs `entrypoint.sh`, which executes both stages:
+- `scripts/run_agent.py` — fetches owner statements (back to `STATEMENT_SINCE`), parses PDFs, loads Postgres
+- `scripts/process_inbox.py` — LLM-classifies remaining inbox mail from the last `INBOX_LOOKBACK_DAYS` days and emails a digest via Resend
 
-## 🚀 Quick Start
+Emails are only labeled `RentalTracker/Processed` after successful processing, so transient failures are retried on the next run, and removing the label forces reprocessing.
 
-### Prerequisites
-
-- Python 3.11+
-- Gmail account with API access
-- Railway account (for cloud deployment)
-- Homebrew (macOS) or apt (Linux) for `poppler` / `pdftotext`
-
-### Local Setup
+## 🚀 Quick Start (local)
 
 ```bash
 git clone https://github.com/probably-kuranes/rental-tracker.git
 cd rental-tracker
 
+python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
 # Install PDF parsing tool
@@ -66,76 +61,71 @@ brew install poppler           # macOS
 # sudo apt-get install poppler-utils  # Ubuntu/Debian
 
 cp .env.example .env
-# Edit .env with your settings
+# Fill in GMAIL_APP_PASSWORD, ANTHROPIC_API_KEY, RESEND_API_KEY
 
-# Authenticate Gmail (creates token.json)
-python3 src/gmail_agent.py --auth
+# Test mailbox connectivity
+python3 -m src.mailbox
 
-# Initialize database
-python3 src/database.py --create
+# Run the statement ingest
+python3 scripts/run_agent.py --dry-run --verbose   # safe preview
+python3 scripts/run_agent.py --verbose             # ingest
 
-# Run the agent
-python3 scripts/run_agent.py --verbose
+# Run the inbox digest
+python3 scripts/process_inbox.py --dry-run --verbose
 
 # View dashboard
 streamlit run dashboard.py
 ```
 
-## 📧 Gmail API Setup
+## 🔐 Gmail Setup (one-time)
 
-1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Create a project and enable the Gmail API
-3. Configure the OAuth consent screen (External, add yourself as test user)
-4. Create an OAuth 2.0 Client ID (Desktop app), download as `credentials.json`
-5. Authenticate locally:
-   ```bash
-   python3 src/gmail_agent.py --auth
-   ```
-6. For Railway, base64-encode both files and set as env vars (see Deployment).
+No Google Cloud project, no OAuth. The mailbox account (`GMAIL_USER`) needs:
+
+1. 2-Step Verification enabled
+2. An app password: https://myaccount.google.com/apppasswords → create one named
+   "rental-tracker" → set it as `GMAIL_APP_PASSWORD`
+3. IMAP enabled (Gmail Settings → Forwarding and POP/IMAP — on by default now)
+
+App passwords do not expire (unlike testing-mode OAuth refresh tokens, which
+died every 7 days and silently broke the old version of this project).
 
 ## ☁️ Cloud Deployment (Railway)
 
-The project deploys as **three Railway services in one project**:
+Three Railway services in one project:
 
 | Service | Purpose | Start command |
 |---------|---------|---------------|
 | `rental-tracker-web` | Streamlit dashboard | `streamlit run dashboard.py --server.port=$PORT --server.address=0.0.0.0` (Dockerfile default) |
-| `rental-tracker-cron` | Daily statement ingest | `./entrypoint.sh` on schedule `0 9 * * *` UTC |
+| `rental-tracker-cron` | Daily ingest + digest | `./entrypoint.sh` on schedule `0 9 * * *` UTC |
 | `Postgres` | Managed database | Railway plugin |
 
-### Environment variables (set on both app services)
+Any push to `main` auto-deploys both app services.
+
+### Environment variables (cron service)
 
 | Variable | Notes |
 |----------|-------|
 | `DATABASE_URL` | Reference: `${{Postgres.DATABASE_URL}}` |
-| `GMAIL_CREDENTIALS_B64` | `base64 < credentials.json` |
-| `GMAIL_TOKEN_B64` | `base64 < token.json` |
-| `GMAIL_SEARCH_QUERY` | Gmail filter for statements |
-| `GMAIL_USER_EMAIL` | Mailbox to monitor |
+| `GMAIL_USER` | `mascariproperties@gmail.com` |
+| `GMAIL_APP_PASSWORD` | Gmail app password (see Gmail Setup) |
+| `GMAIL_SEARCH_QUERY` | Gmail filter for statements (optional, has default) |
+| `STATEMENT_SINCE` | `2025/01/01` — earliest statement to ingest |
+| `INBOX_LOOKBACK_DAYS` | `7` — digest window |
 | `PROCESSED_LABEL` | `RentalTracker/Processed` |
-| `ANTHROPIC_API_KEY` | Required by `process_inbox.py` for LLM triage |
-| `DIGEST_RECIPIENT` | Where the LLM digest is sent |
+| `ANTHROPIC_API_KEY` | Claude API (triage, synopses, parse fallback) |
+| `RESEND_API_KEY` | Resend HTTPS email API |
+| `EMAIL_TO` | Digest recipient (`mascari.david@gmail.com`) |
 
-### Deploy
-
-```bash
-# First time
-railway login
-railway link            # link to the project
-railway up              # deploys the linked service
-
-# Subsequent deploys (any push to main):
-git push origin main    # Railway auto-builds from GitHub
-```
-
-See `deploy/railway-setup.md` for the full step-by-step guide (project creation, Postgres setup, cron service, base64 secrets).
+The web service only needs `DATABASE_URL`.
 
 ## 📊 Dashboard Features
 
 - **Portfolio Overview**: Total properties, income, expenses, NOI
 - **Property Performance**: Income, expenses, and NOI by property
-- **Expense Breakdown**: Pie charts and detailed expense lists
-- **Alerts**: Warnings for high expense ratios, low margins, high repairs
+- **Trends**: Multi-month income/expense/NOI lines, per-property NOI over time
+- **Expense Breakdown**: Pie charts and top-expense lists
+- **Alerts**: High expense ratios, low margins, high repairs
+- **Export**: Property-month and expense CSVs
 - **Filters**: View by owner or specific property
 
 ## 🗂️ Project Structure
@@ -146,81 +136,41 @@ rental-tracker/
 ├── requirements.txt
 ├── .env.example
 ├── Dockerfile                  # Railway container (web default; cron overrides CMD)
-├── entrypoint.sh               # Decodes base64 secrets, runs run_agent.py
-├── Procfile / nixpacks.toml    # Railway build hints
+├── entrypoint.sh               # Cron: run_agent.py + process_inbox.py
 ├── dashboard.py                # Streamlit dashboard
-├── sample_data.db              # Demo database
 ├── src/
-│   ├── gmail_agent.py          # Gmail OAuth + fetch (file or base64 creds)
+│   ├── config.py               # All settings from env vars
+│   ├── mailbox.py              # Gmail over IMAP (search, fetch, label)
+│   ├── emailer.py              # Resend HTTPS delivery
 │   ├── pdf_parser.py           # Mid South Best Rentals PDF parser
-│   ├── llm_parser.py           # Claude API integration
-│   ├── classifier.py           # Document routing
+│   ├── llm_parser.py           # Claude: classify, summarize, parse fallback
+│   ├── classifier.py           # Document/email routing
 │   ├── database.py             # SQLAlchemy models (SQLite + Postgres)
 │   ├── data_loader.py          # Import parsed data with dedup
 │   └── reports.py              # Console reports
 ├── scripts/
 │   ├── run_agent.py            # Statement ingest entry point
-│   ├── process_inbox.py        # LLM inbox triage + digest
-│   ├── setup_db.py
-│   └── setup_gmail.py
-└── deploy/
-    ├── deploy.sh               # Railway deploy helper
-    └── railway-setup.md        # Full Railway deployment guide
+│   ├── process_inbox.py        # LLM inbox triage + Resend digest
+│   └── setup_db.py
+└── tests/
+    └── test_parser.py
 ```
 
 ## 💻 Usage
 
-### Process statements
-
 ```bash
-python3 scripts/run_agent.py --dry-run --verbose   # safe preview
-python3 scripts/run_agent.py --verbose             # ingest
-python3 scripts/run_agent.py --verbose --summary   # ingest + report
-```
+# Statements (add --since 2025/01/01 to override the backfill floor)
+python3 scripts/run_agent.py --dry-run --verbose
+python3 scripts/run_agent.py --verbose --summary
 
-Emails are only labeled `RentalTracker/Processed` after **all** attachments succeed, so transient failures (parser crash, missing `pdftotext`, DB outage) are automatically retried on the next run.
-
-### LLM inbox digest
-
-```bash
+# Inbox digest (add --since 2025/01/01 for a full backfill run)
 python3 scripts/process_inbox.py --verbose
-python3 scripts/process_inbox.py --dry-run         # don't send digest
+python3 scripts/process_inbox.py --dry-run
+
+# Ad-hoc against production
+railway run python scripts/run_agent.py --verbose
+railway logs
 ```
-
-This script picks up any unprocessed mail that *isn't* a recognized owner statement, asks Claude to summarize each one, and emails you a single digest. Requires `ANTHROPIC_API_KEY`.
-
-### Run on Railway
-
-```bash
-railway run python scripts/run_agent.py --verbose  # ad-hoc against prod env
-railway logs                                       # tail logs
-railway open                                       # open project in browser
-```
-
-### Query database
-
-```bash
-# Local SQLite
-sqlite3 rental_tracker.db
-
-# Railway Postgres
-railway connect Postgres
-```
-
-## ⚙️ Configuration
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `DATABASE_URL` | Database connection string | `sqlite:///rental_tracker.db` |
-| `GMAIL_CREDENTIALS_FILE` | OAuth credentials path (local) | `credentials.json` |
-| `GMAIL_TOKEN_FILE` | Auth token path (local) | `token.json` |
-| `GMAIL_CREDENTIALS_B64` | Base64 OAuth credentials (cloud) | - |
-| `GMAIL_TOKEN_B64` | Base64 auth token (cloud) | - |
-| `GMAIL_SEARCH_QUERY` | Gmail search filter | see `.env.example` |
-| `GMAIL_USER_EMAIL` | Mailbox to monitor | - |
-| `PROCESSED_LABEL` | Label for processed emails | `RentalTracker/Processed` |
-| `ANTHROPIC_API_KEY` | Claude API key (LLM digest) | - |
-| `DIGEST_RECIPIENT` | Where to send LLM digest | - |
 
 ## 🗄️ Database Schema
 
@@ -231,36 +181,27 @@ railway connect Postgres
 - **expenses** - Individual expense line items
 - **import_logs** - Track import operations
 
-## 🔐 Security
-
-- Gmail credentials supplied as base64 env vars on Railway (no file mounts)
-- `.env`, `credentials.json`, `token.json`, `*.db` excluded from Git
-- OAuth tokens refreshed automatically
-
 ## 💰 Cost Estimate
 
-- **Railway Hobby plan:** $5/month flat (covers web + cron + Postgres usage for this workload)
-- **Anthropic API:** pennies per inbox digest run
+- **Railway Hobby plan:** $5/month flat
+- **Anthropic API:** pennies per digest run
+- **Resend:** free tier (100 emails/day)
 
 ## 🛠️ Troubleshooting
 
-### Gmail authentication fails
-```bash
-rm token.json
-python3 src/gmail_agent.py --auth
-# Then re-encode and update GMAIL_TOKEN_B64 on Railway
-base64 < token.json | pbcopy
-```
+### IMAP login fails
+- Regenerate the app password and update `GMAIL_APP_PASSWORD`
+- Confirm 2FA is still enabled on the account
 
 ### No emails found
-- Check `GMAIL_SEARCH_QUERY`
+- Check `GMAIL_SEARCH_QUERY` and `STATEMENT_SINCE`
 - Verify the email isn't already labeled `RentalTracker/Processed`
+  (remove the label to force reprocessing)
 
 ### Railway cron didn't fire
 ```bash
 railway logs --service rental-tracker-cron
 ```
-Cron only runs on its schedule, not on deploy. To smoke-test, temporarily set the schedule a few minutes out.
 
 ### Dashboard shows no data
 - Local: ensure `rental_tracker.db` exists or set `DATABASE_URL`
@@ -268,10 +209,10 @@ Cron only runs on its schedule, not on deploy. To smoke-test, temporarily set th
 
 ## 🚧 Future Enhancements
 
-- [ ] Multi-month trend analysis
-- [ ] Mobile-responsive dashboard
-- [ ] Export reports to PDF/Excel
-- [ ] LLM-based parsing for non-standard statement formats
+- [ ] Export reports to PDF/Excel (CSV export shipped)
+- [ ] Year-over-year comparisons
+- [ ] Unpaid-bills tracking from the statement's Unpaid Bills section
+- [ ] Alerting when a statement fails to arrive on schedule
 
 ## 📝 License
 
@@ -280,7 +221,3 @@ MIT
 ## 👤 Author
 
 Built for tracking Memphis rental properties managed by Mid South Best Rentals.
-
----
-
-**Questions?** See `deploy/railway-setup.md` or read the inline code comments.
