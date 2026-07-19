@@ -66,8 +66,11 @@ Return ONLY valid JSON (no markdown fences, no commentary) with this structure:
 
 Use 0 for financial values you cannot find. Use the street address as written
 but omit trailing unit suffixes like "_1". If the document repeats the same
-statement more than once, extract it only once. If this is not a rental owner
-statement at all, return {"owners": []}."""
+statement more than once, extract it only once. Simple year-end or investor
+statements with only monthly/annual totals and no per-property pages still
+count: use the calendar year (01/01/YYYY - 12/31/YYYY) as the period, put the
+annual totals in the owner-level fields, and leave "properties" empty. Only
+return {"owners": []} if the document is not a rental income statement at all."""
 
 
 def _text_of(message) -> str:

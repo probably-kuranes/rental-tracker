@@ -174,18 +174,24 @@ class Classifier:
         doc_type, confidence = self.classify_pdf(pdf_path)
 
         if doc_type == DocumentType.OWNER_STATEMENT and confidence > 0.8:
-            # Use deterministic parser for known formats
+            # Try the deterministic parser first
             result = parse_pdf(pdf_path)
-            # Non-standard layouts (e.g. annual statements) can pass the
-            # header check but yield no recognizable property pages; retry
-            # with the LLM parser so the per-property detail isn't lost.
-            no_properties = result.get('owners') and not any(
-                o.get('properties') for o in result['owners']
+            det_has_owners = bool(result.get('owners'))
+            det_has_props = any(
+                o.get('properties') for o in result.get('owners', [])
             )
-            if no_properties and self.enable_llm:
+            # Non-standard layouts (annual statements, year-end investor
+            # statements) can classify as owner statements but yield nothing
+            # deterministically; retry with the LLM parser. Prefer the LLM
+            # result when it found property detail, or when the deterministic
+            # parse found nothing at all.
+            if self.enable_llm and not det_has_props:
                 try:
                     llm_result = self.llm_parser.parse_document(pdf_path)
-                    if any(o.get('properties') for o in llm_result.get('owners', [])):
+                    llm_has_props = any(
+                        o.get('properties') for o in llm_result.get('owners', [])
+                    )
+                    if llm_has_props or (not det_has_owners and llm_result.get('owners')):
                         return llm_result
                 except Exception:
                     # Fall back to the deterministic (portfolio-only) result
