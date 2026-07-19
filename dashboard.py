@@ -1,16 +1,20 @@
 """
 Rental Property Tracker - Streamlit Dashboard
 
-A web-based dashboard for viewing rental property performance,
-expenses, and financial metrics.
+Every section is scoped to the period chosen in the sidebar, and the active
+period is stated in each section header. Management fees (a function of
+income) are shown separately from operating expenses (repairs etc.)
+throughout. Multi-month statements (e.g. annual statements) are excluded from
+monthly aggregates to avoid double counting and are summarized separately.
 """
 
-import streamlit as st
+from datetime import date, datetime, timedelta
+
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from datetime import datetime
-from sqlalchemy import func
+import streamlit as st
+
 from src.database import Database, Owner, Property, MonthlyReport, PropertyMonth, Expense
 
 # Page configuration
@@ -21,30 +25,20 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS
-st.markdown("""
-    <style>
-    .metric-card {
-        background-color: #f0f2f6;
-        padding: 20px;
-        border-radius: 10px;
-        border-left: 5px solid #1f77b4;
-    }
-    .stMetric {
-        background-color: #ffffff;
-        padding: 15px;
-        border-radius: 8px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }
-    </style>
-""", unsafe_allow_html=True)
+# A statement covering more than this many days is treated as multi-month
+# (annual statements) rather than a monthly statement.
+MONTHLY_MAX_DAYS = 35
+
+COLOR_INCOME = '#2ecc71'
+COLOR_MGMT = '#f39c12'
+COLOR_OPEX = '#e74c3c'
+COLOR_NOI = '#3498db'
 
 
 @st.cache_resource
 def get_db():
     """Get database connection."""
     import os
-    # Use DATABASE_URL env var (e.g. Railway PostgreSQL), fall back to local SQLite
     db_url = os.getenv('DATABASE_URL')
     if not db_url:
         if os.path.exists('rental_tracker.db'):
@@ -55,419 +49,403 @@ def get_db():
             db_url = 'sqlite:///rental_tracker.db'
 
     db = Database(db_url)
-    # Ensure tables exist
     try:
         db.create_tables()
-    except:
+    except Exception:
         pass
     return db
 
 
 def load_data():
-    """Load all data from the database."""
+    """Load all data and build one denormalized property-month dataframe."""
     db = get_db()
 
     with db.session() as session:
-        # Get all data
-        owners = session.query(Owner).all()
-        properties = session.query(Property).all()
-        monthly_reports = session.query(MonthlyReport).all()
-        property_months = session.query(PropertyMonth).all()
-        expenses = session.query(Expense).all()
+        owners = pd.DataFrame([{
+            'owner_id': o.id, 'owner': o.name
+        } for o in session.query(Owner).all()])
 
-        # Convert to dictionaries for easier handling
-        owners_data = [{
-            'id': o.id,
-            'name': o.name,
-            'created_at': o.created_at
-        } for o in owners]
-
-        properties_data = [{
-            'id': p.id,
-            'owner_id': p.owner_id,
-            'address': p.address,
+        properties = pd.DataFrame([{
+            'property_id': p.id, 'owner_id': p.owner_id, 'address': p.address,
             'current_rent': p.current_rent,
-            'security_deposit': p.security_deposit,
-            'is_active': p.is_active
-        } for p in properties]
+        } for p in session.query(Property).all()])
 
-        monthly_reports_data = [{
-            'id': mr.id,
-            'owner_id': mr.owner_id,
-            'period_start': mr.period_start,
-            'period_end': mr.period_end,
-            'income': mr.income,
-            'expenses': mr.expenses,
-            'mgmt_fees': mr.mgmt_fees,
-            'ending_balance': mr.ending_balance,
-            'due_to_owner': mr.due_to_owner
-        } for mr in monthly_reports]
+        reports = pd.DataFrame([{
+            'report_id': r.id, 'owner_id': r.owner_id,
+            'period_start': r.period_start, 'period_end': r.period_end,
+            'report_income': r.income, 'report_expenses': r.expenses,
+            'report_mgmt_fees': r.mgmt_fees,
+        } for r in session.query(MonthlyReport).all()])
 
-        property_months_data = [{
-            'id': pm.id,
-            'property_id': pm.property_id,
-            'monthly_report_id': pm.monthly_report_id,
-            'total_income': pm.total_income,
-            'total_expenses': pm.total_expenses,
-            'mgmt_fees': pm.mgmt_fees,
-            'repairs': pm.repairs,
-            'noi': pm.noi,
-            'noi_margin': pm.noi_margin,
-            'expense_ratio': pm.expense_ratio
-        } for pm in property_months]
+        pm = pd.DataFrame([{
+            'pm_id': pm_.id, 'property_id': pm_.property_id,
+            'report_id': pm_.monthly_report_id,
+            'income': pm_.total_income, 'expenses': pm_.total_expenses,
+            'mgmt_fees': pm_.mgmt_fees, 'repairs': pm_.repairs,
+            'noi': pm_.noi,
+        } for pm_ in session.query(PropertyMonth).all()])
 
-        expenses_data = [{
-            'id': e.id,
-            'property_month_id': e.property_month_id,
-            'date': e.date,
-            'vendor': e.vendor,
-            'description': e.description,
-            'amount': e.amount,
-            'category': e.category
-        } for e in expenses]
+        expenses = pd.DataFrame([{
+            'pm_id': e.property_month_id, 'date': e.date, 'vendor': e.vendor,
+            'description': e.description, 'amount': e.amount,
+            'category': e.category,
+        } for e in session.query(Expense).all()])
 
-        return {
-            'owners': pd.DataFrame(owners_data) if owners_data else pd.DataFrame(),
-            'properties': pd.DataFrame(properties_data) if properties_data else pd.DataFrame(),
-            'monthly_reports': pd.DataFrame(monthly_reports_data) if monthly_reports_data else pd.DataFrame(),
-            'property_months': pd.DataFrame(property_months_data) if property_months_data else pd.DataFrame(),
-            'expenses': pd.DataFrame(expenses_data) if expenses_data else pd.DataFrame()
-        }
+    if pm.empty or properties.empty:
+        return None
+
+    df = (pm
+          .merge(reports, on='report_id')
+          .merge(properties, on='property_id', suffixes=('', '_prop'))
+          .merge(owners, on='owner_id'))
+    df['period_start'] = pd.to_datetime(df['period_start'])
+    df['period_end'] = pd.to_datetime(df['period_end'])
+    df['period_days'] = (df['period_end'] - df['period_start']).dt.days + 1
+    df['is_monthly'] = df['period_days'] <= MONTHLY_MAX_DAYS
+    df['month'] = df['period_end'].dt.to_period('M').dt.to_timestamp()
+    # Operating expenses exclude management fees (which scale with income)
+    df['opex'] = (df['expenses'] - df['mgmt_fees']).clip(lower=0)
+
+    reports['period_start'] = pd.to_datetime(reports['period_start'])
+    reports['period_end'] = pd.to_datetime(reports['period_end'])
+    reports['period_days'] = (reports['period_end'] - reports['period_start']).dt.days + 1
+    reports = reports.merge(owners, on='owner_id')
+
+    return {'pm': df, 'reports': reports, 'expenses': expenses,
+            'owners': owners, 'properties': properties}
+
+
+def pick_period():
+    """Sidebar period selector. Returns (start, end, label)."""
+    today = date.today()
+    presets = {
+        f'{today.year} year to date': (date(today.year, 1, 1), today),
+        'Last 3 months': (today - timedelta(days=92), today),
+        'Monthly data era (Dec 2025 on)': (date(2025, 12, 1), today),
+        'Calendar 2025': (date(2025, 1, 1), date(2025, 12, 31)),
+        'All time': (date(2000, 1, 1), today),
+        'Custom range': None,
+    }
+    choice = st.sidebar.selectbox("Period", list(presets.keys()), index=0)
+    if choice == 'Custom range':
+        start = st.sidebar.date_input("From", date(today.year, 1, 1))
+        end = st.sidebar.date_input("To", today)
+    else:
+        start, end = presets[choice]
+    label = f"{start:%-d %b %Y} – {end:%-d %b %Y}"
+    return pd.Timestamp(start), pd.Timestamp(end), label
+
+
+def money(x):
+    return f"-${abs(x):,.0f}" if x < 0 else f"${x:,.0f}"
 
 
 def main():
-    """Main dashboard function."""
-
-    # Title
     st.title("🏠 Rental Property Tracker Dashboard")
 
-    # Add refresh button in sidebar
     if st.sidebar.button("🔄 Refresh Data"):
         st.cache_resource.clear()
         st.rerun()
 
-    st.markdown("---")
-
-    # Load data
     data = load_data()
-
-    # Check if we have data
-    if data['properties'].empty:
+    if data is None:
         st.warning("📭 No data found. Run the rental tracker to import owner statements.")
-        st.info("Run: `python3 scripts/run_agent.py --verbose` to process emails")
         return
 
-    # Sidebar filters
+    pm_all = data['pm']
+
+    # ---- Sidebar filters ---------------------------------------------------
     st.sidebar.header("Filters")
+    start, end, period_label = pick_period()
 
-    # Owner filter
-    if not data['owners'].empty:
-        owner_options = ['All'] + data['owners']['name'].tolist()
-        selected_owner = st.sidebar.selectbox("Owner", owner_options)
-    else:
-        selected_owner = 'All'
+    owner_options = ['All'] + sorted(pm_all['owner'].unique().tolist())
+    selected_owner = st.sidebar.selectbox("Owner", owner_options)
 
-    # Property filter
-    if not data['properties'].empty:
-        property_options = ['All'] + data['properties']['address'].tolist()
-        selected_property = st.sidebar.selectbox("Property", property_options)
-    else:
-        selected_property = 'All'
+    property_options = ['All'] + sorted(pm_all['address'].unique().tolist())
+    selected_property = st.sidebar.selectbox("Property", property_options)
 
-    # Filter data based on selections
-    filtered_properties = data['properties'].copy()
+    # Rows whose statement period ends inside the selected window
+    in_period = pm_all[(pm_all['period_end'] >= start) & (pm_all['period_end'] <= end)]
     if selected_owner != 'All':
-        owner_id = data['owners'][data['owners']['name'] == selected_owner]['id'].iloc[0]
-        filtered_properties = filtered_properties[filtered_properties['owner_id'] == owner_id]
-
+        in_period = in_period[in_period['owner'] == selected_owner]
     if selected_property != 'All':
-        filtered_properties = filtered_properties[filtered_properties['address'] == selected_property]
+        in_period = in_period[in_period['address'] == selected_property]
 
-    # Get filtered property IDs
-    property_ids = filtered_properties['id'].tolist()
+    # Monthly rows drive all aggregates; multi-month statements are reported
+    # separately so overlapping periods are never double counted.
+    monthly = in_period[in_period['is_monthly']]
+    multi = in_period[~in_period['is_monthly']]
 
-    # Filter property months
-    if not data['property_months'].empty and property_ids:
-        filtered_pm = data['property_months'][data['property_months']['property_id'].isin(property_ids)]
+    n_months = monthly['month'].nunique()
+    n_props = monthly['address'].nunique()
+
+    # ---- Portfolio overview ------------------------------------------------
+    st.header(f"📊 Portfolio Overview — {period_label}")
+
+    if monthly.empty:
+        st.info("No monthly statement data in this period.")
     else:
-        filtered_pm = data['property_months'].copy()
+        income = monthly['income'].sum()
+        mgmt = monthly['mgmt_fees'].sum()
+        opex = monthly['opex'].sum()
+        noi = monthly['noi'].sum()
 
-    # Portfolio Overview
-    st.header("📊 Portfolio Overview")
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.metric("Income", money(income))
+        c2.metric("Mgmt Fees", money(mgmt))
+        c3.metric("Operating Expenses", money(opex))
+        c4.metric("Net Operating Income", money(noi))
+        c5.metric("Avg NOI / month", money(noi / n_months) if n_months else "–")
+        st.caption(
+            f"Based on {len(monthly)} property-months across {n_props} propert"
+            f"{'ies' if n_props != 1 else 'y'} and {n_months} calendar month"
+            f"{'s' if n_months != 1 else ''} of statements. "
+            f"Coverage varies by property — see Property Details."
+        )
 
-    col1, col2, col3, col4 = st.columns(4)
-
-    with col1:
-        total_properties = len(filtered_properties)
-        st.metric("Total Properties", total_properties)
-
-    with col2:
-        if not filtered_pm.empty:
-            total_income = filtered_pm['total_income'].sum()
-            st.metric("Total Income", f"${total_income:,.2f}")
-        else:
-            st.metric("Total Income", "$0.00")
-
-    with col3:
-        if not filtered_pm.empty:
-            total_expenses = filtered_pm['total_expenses'].sum()
-            st.metric("Total Expenses", f"${total_expenses:,.2f}")
-        else:
-            st.metric("Total Expenses", "$0.00")
-
-    with col4:
-        if not filtered_pm.empty:
-            total_noi = filtered_pm['noi'].sum()
-            st.metric("Net Operating Income", f"${total_noi:,.2f}")
-        else:
-            st.metric("Net Operating Income", "$0.00")
+    if not multi.empty:
+        st.markdown("**Multi-month statements in this period** "
+                    "(kept out of the monthly figures above to avoid double counting):")
+        for _, r in multi.iterrows():
+            st.markdown(
+                f"- {r['address']} ({r['owner']}), "
+                f"{r['period_start']:%b %Y} – {r['period_end']:%b %Y}: "
+                f"income {money(r['income'])}, NOI {money(r['noi'])}"
+            )
+    # Multi-month statements with no property split (portfolio level only)
+    rep = data['reports']
+    rep_multi = rep[(rep['period_days'] > MONTHLY_MAX_DAYS)
+                    & (rep['period_end'] >= start) & (rep['period_end'] <= end)]
+    if selected_owner != 'All':
+        rep_multi = rep_multi[rep_multi['owner'] == selected_owner]
+    rep_multi = rep_multi[~rep_multi['report_id'].isin(multi['report_id'] if not multi.empty else [])]
+    known_ids = set(pm_all['report_id'])
+    rep_only = rep_multi[~rep_multi['report_id'].isin(known_ids)]
+    if not rep_only.empty:
+        st.markdown("**Annual/multi-month statements (portfolio totals only):**")
+        for _, r in rep_only.iterrows():
+            st.markdown(
+                f"- {r['owner']}, {r['period_start']:%b %Y} – {r['period_end']:%b %Y}: "
+                f"income {money(r['report_income'])}, "
+                f"expenses {money(r['report_expenses'])}"
+            )
 
     st.markdown("---")
 
-    # Property Performance
-    st.header("🏘️ Property Performance")
+    # ---- Property performance ---------------------------------------------
+    st.header(f"🏘️ Property Performance — {period_label}")
 
-    if not filtered_pm.empty:
-        # Merge with property data to get addresses
-        pm_with_address = filtered_pm.merge(
-            filtered_properties[['id', 'address']],
-            left_on='property_id',
-            right_on='id',
-            suffixes=('', '_prop')
-        )
-
-        # Create performance chart
-        fig_performance = go.Figure()
-
-        fig_performance.add_trace(go.Bar(
-            name='Income',
-            x=pm_with_address['address'],
-            y=pm_with_address['total_income'],
-            marker_color='#2ecc71'
-        ))
-
-        fig_performance.add_trace(go.Bar(
-            name='Expenses',
-            x=pm_with_address['address'],
-            y=pm_with_address['total_expenses'],
-            marker_color='#e74c3c'
-        ))
-
-        fig_performance.add_trace(go.Bar(
-            name='NOI',
-            x=pm_with_address['address'],
-            y=pm_with_address['noi'],
-            marker_color='#3498db'
-        ))
-
-        fig_performance.update_layout(
-            barmode='group',
-            title='Income, Expenses, and NOI by Property',
-            xaxis_title='Property',
-            yaxis_title='Amount ($)',
-            height=400
-        )
-
-        st.plotly_chart(fig_performance, use_container_width=True)
-
-        # Property details table
-        st.subheader("Property Details")
-
-        display_df = pm_with_address[['address', 'total_income', 'total_expenses', 'noi', 'noi_margin', 'expense_ratio']].copy()
-        display_df.columns = ['Property', 'Income', 'Expenses', 'NOI', 'NOI Margin %', 'Expense Ratio %']
-        display_df['NOI Margin %'] = (display_df['NOI Margin %'] * 100).round(1)
-        display_df['Expense Ratio %'] = (display_df['Expense Ratio %'] * 100).round(1)
-        display_df['Income'] = display_df['Income'].apply(lambda x: f"${x:,.2f}")
-        display_df['Expenses'] = display_df['Expenses'].apply(lambda x: f"${x:,.2f}")
-        display_df['NOI'] = display_df['NOI'].apply(lambda x: f"${x:,.2f}")
-
-        st.dataframe(display_df, use_container_width=True, hide_index=True)
+    if monthly.empty:
+        st.info("No monthly data in this period.")
     else:
-        st.info("No property performance data available.")
-
-    st.markdown("---")
-
-    # Multi-month Trends
-    st.header("📈 Trends")
-
-    if not filtered_pm.empty and not data['monthly_reports'].empty:
-        pm_with_period = filtered_pm.merge(
-            data['monthly_reports'][['id', 'period_start', 'period_end']],
-            left_on='monthly_report_id',
-            right_on='id',
-            suffixes=('', '_report')
-        )
-        pm_with_period['month'] = pd.to_datetime(
-            pm_with_period['period_end']
-        ).dt.to_period('M').dt.to_timestamp()
-
-        monthly = pm_with_period.groupby('month').agg(
-            income=('total_income', 'sum'),
-            expenses=('total_expenses', 'sum'),
+        agg = monthly.groupby('address').agg(
+            income=('income', 'sum'),
+            mgmt=('mgmt_fees', 'sum'),
+            opex=('opex', 'sum'),
             noi=('noi', 'sum'),
-        ).reset_index().sort_values('month')
+            months=('month', 'nunique'),
+        ).reset_index().sort_values('income', ascending=False)
 
-        if len(monthly) > 1:
-            fig_trend = go.Figure()
-            fig_trend.add_trace(go.Scatter(
-                name='Income', x=monthly['month'], y=monthly['income'],
-                mode='lines+markers', line=dict(color='#2ecc71')))
-            fig_trend.add_trace(go.Scatter(
-                name='Expenses', x=monthly['month'], y=monthly['expenses'],
-                mode='lines+markers', line=dict(color='#e74c3c')))
-            fig_trend.add_trace(go.Scatter(
-                name='NOI', x=monthly['month'], y=monthly['noi'],
-                mode='lines+markers', line=dict(color='#3498db')))
-            fig_trend.update_layout(
-                title='Income, Expenses, and NOI by Month',
-                xaxis_title='Month', yaxis_title='Amount ($)', height=400)
-            st.plotly_chart(fig_trend, use_container_width=True)
+        fig = go.Figure()
+        fig.add_trace(go.Bar(
+            name='Income', x=agg['address'], y=agg['income'],
+            marker_color=COLOR_INCOME))
+        fig.add_trace(go.Bar(
+            name='Mgmt fees', x=agg['address'], y=-agg['mgmt'],
+            marker_color=COLOR_MGMT))
+        fig.add_trace(go.Bar(
+            name='Operating expenses', x=agg['address'], y=-agg['opex'],
+            marker_color=COLOR_OPEX))
+        fig.add_trace(go.Scatter(
+            name='NOI', x=agg['address'], y=agg['noi'],
+            mode='markers', marker=dict(color=COLOR_NOI, size=14, symbol='diamond')))
+        fig.update_layout(
+            barmode='relative',
+            title=f'Income up, costs down; ◆ = NOI ({period_label})',
+            yaxis_title='Amount ($)', height=450,
+            legend=dict(orientation='h', y=1.12),
+        )
+        fig.add_hline(y=0, line_width=1, line_color='#888')
+        st.plotly_chart(fig, width='stretch')
 
-            # Per-property NOI trend
-            prop_monthly = pm_with_period.merge(
-                filtered_properties[['id', 'address']],
-                left_on='property_id', right_on='id',
-                suffixes=('', '_prop')
-            ).groupby(['month', 'address'])['noi'].sum().reset_index()
-
-            fig_prop_trend = px.line(
-                prop_monthly, x='month', y='noi', color='address',
-                markers=True, title='NOI by Property Over Time',
-                labels={'month': 'Month', 'noi': 'NOI ($)', 'address': 'Property'})
-            fig_prop_trend.update_layout(height=400)
-            st.plotly_chart(fig_prop_trend, use_container_width=True)
-        else:
-            st.info("Trends will appear once more than one month of statements is imported.")
-    else:
-        st.info("No trend data available yet.")
+        # ---- Property details (one row per property) ----------------------
+        st.subheader(f"Property Details — {period_label}")
+        det = agg.copy()
+        det['noi_margin'] = (det['noi'] / det['income']).where(det['income'] > 0)
+        det['avg_noi_month'] = det['noi'] / det['months']
+        show = pd.DataFrame({
+            'Property': det['address'],
+            'Months of data': det['months'],
+            'Income': det['income'].map(money),
+            'Mgmt Fees': det['mgmt'].map(money),
+            'Op. Expenses': det['opex'].map(money),
+            'NOI': det['noi'].map(money),
+            'NOI / month': det['avg_noi_month'].map(money),
+            'NOI Margin': det['noi_margin'].map(
+                lambda v: f"{v*100:.0f}%" if pd.notna(v) else "–"),
+        })
+        st.dataframe(show, width='stretch', hide_index=True)
+        if det['months'].nunique() > 1:
+            st.caption("⚠️ Months of data differ between properties — compare "
+                       "NOI / month, not totals.")
 
     st.markdown("---")
 
-    # Expense Breakdown
-    st.header("💰 Expense Breakdown")
+    # ---- Trends ------------------------------------------------------------
+    st.header(f"📈 Monthly Trends — {period_label}")
 
-    if not data['expenses'].empty and not filtered_pm.empty:
-        # Get expenses for filtered properties
-        filtered_expenses = data['expenses'][
-            data['expenses']['property_month_id'].isin(filtered_pm['id'])
-        ]
+    if monthly.empty or monthly['month'].nunique() < 2:
+        st.info("Trends appear once the period contains at least two months of monthly statements.")
+    else:
+        month_index = pd.period_range(
+            monthly['month'].min(), monthly['month'].max(), freq='M'
+        ).to_timestamp()
 
-        if not filtered_expenses.empty:
+        by_month = (monthly.groupby('month')
+                    .agg(income=('income', 'sum'), mgmt=('mgmt_fees', 'sum'),
+                         opex=('opex', 'sum'), noi=('noi', 'sum'))
+                    .reindex(month_index))
+
+        fig_t = go.Figure()
+        for col, label, color in [('income', 'Income', COLOR_INCOME),
+                                  ('mgmt', 'Mgmt fees', COLOR_MGMT),
+                                  ('opex', 'Operating expenses', COLOR_OPEX),
+                                  ('noi', 'NOI', COLOR_NOI)]:
+            fig_t.add_trace(go.Scatter(
+                x=by_month.index, y=by_month[col], name=label,
+                mode='lines+markers', line=dict(color=color),
+                connectgaps=False))
+        fig_t.update_layout(
+            title='Portfolio by month (gaps = no statement received)',
+            yaxis_title='Amount ($)', height=420,
+            legend=dict(orientation='h', y=1.12))
+        st.plotly_chart(fig_t, width='stretch')
+
+        prop_noi = (monthly.groupby(['month', 'address'])['noi'].sum()
+                    .unstack().reindex(month_index))
+        fig_p = go.Figure()
+        for addr in prop_noi.columns:
+            fig_p.add_trace(go.Scatter(
+                x=prop_noi.index, y=prop_noi[addr], name=addr,
+                mode='lines+markers', connectgaps=False))
+        fig_p.update_layout(
+            title='NOI by property (gaps = no statement for that property that month)',
+            yaxis_title='NOI ($)', height=420)
+        st.plotly_chart(fig_p, width='stretch')
+
+    st.markdown("---")
+
+    # ---- Expense breakdown -------------------------------------------------
+    st.header(f"💰 Expense Breakdown — {period_label}")
+
+    exp = data['expenses']
+    if exp.empty or in_period.empty:
+        st.info("No expense line items in this period.")
+    else:
+        exp_period = exp[exp['pm_id'].isin(in_period['pm_id'])].copy()
+        # Management fees are shown in their own metrics; the breakdown is
+        # about operating expenses (things that went wrong / upkeep).
+        exp_op = exp_period[exp_period['category'] != 'Management Fee']
+
+        if exp_op.empty:
+            st.info("No operating-expense line items in this period.")
+        else:
             col1, col2 = st.columns(2)
 
             with col1:
-                # Expense by category pie chart
-                expense_by_category = filtered_expenses.groupby('category')['amount'].sum().reset_index()
-
-                fig_pie = px.pie(
-                    expense_by_category,
-                    values='amount',
-                    names='category',
-                    title='Expenses by Category',
-                    hole=0.4
-                )
-                st.plotly_chart(fig_pie, use_container_width=True)
+                by_cat = exp_op.groupby('category')['amount'].sum().reset_index()
+                fig_pie = px.pie(by_cat, values='amount', names='category',
+                                 title=f'Operating expenses by category ({period_label})',
+                                 hole=0.4)
+                st.plotly_chart(fig_pie, width='stretch')
 
             with col2:
-                # Top expenses
-                st.subheader("Top Expenses")
-                top_expenses = filtered_expenses.nlargest(10, 'amount')[['date', 'vendor', 'description', 'amount', 'category']]
-                top_expenses['amount'] = top_expenses['amount'].apply(lambda x: f"${x:,.2f}")
-                st.dataframe(top_expenses, use_container_width=True, hide_index=True)
-        else:
-            st.info("No expense data available for selected filters.")
-    else:
-        st.info("No expense data available.")
+                st.subheader("Top expenses")
+                top = exp_op.nlargest(12, 'amount')[
+                    ['date', 'amount', 'category', 'vendor', 'description']]
+                st.dataframe(
+                    top,
+                    width='stretch', hide_index=True,
+                    column_config={
+                        'date': st.column_config.DateColumn('Date'),
+                        'amount': st.column_config.NumberColumn(
+                            'Amount', format='$%.2f'),
+                        'category': 'Category',
+                        'vendor': 'Vendor',
+                        'description': st.column_config.TextColumn(
+                            'Description', width='medium'),
+                    })
 
     st.markdown("---")
 
-    # Alerts
-    st.header("🚨 Alerts")
+    # ---- Alerts ------------------------------------------------------------
+    st.header(f"🚨 Alerts — {period_label}")
 
-    if not filtered_pm.empty:
+    if monthly.empty:
+        st.info("No monthly data in this period.")
+    else:
         alerts = []
+        agg = monthly.groupby('address').agg(
+            income=('income', 'sum'), opex=('opex', 'sum'),
+            repairs=('repairs', 'sum'), noi=('noi', 'sum'),
+            months=('month', 'nunique')).reset_index()
 
-        # High expense ratio alert
-        high_expense = filtered_pm[filtered_pm['expense_ratio'] > 0.3]
-        if not high_expense.empty:
-            for _, row in high_expense.iterrows():
-                prop = filtered_properties[filtered_properties['id'] == row['property_id']]['address'].iloc[0]
-                alerts.append({
-                    'type': '⚠️ High Expense Ratio',
-                    'property': prop,
-                    'message': f"Expense ratio: {row['expense_ratio']*100:.1f}%"
-                })
-
-        # Low NOI margin alert
-        low_noi = filtered_pm[filtered_pm['noi_margin'] < 0.2]
-        if not low_noi.empty:
-            for _, row in low_noi.iterrows():
-                prop = filtered_properties[filtered_properties['id'] == row['property_id']]['address'].iloc[0]
-                alerts.append({
-                    'type': '⚠️ Low NOI Margin',
-                    'property': prop,
-                    'message': f"NOI margin: {row['noi_margin']*100:.1f}%"
-                })
-
-        # High repairs alert
-        high_repairs = filtered_pm[filtered_pm['repairs'] > 500]
-        if not high_repairs.empty:
-            for _, row in high_repairs.iterrows():
-                prop = filtered_properties[filtered_properties['id'] == row['property_id']]['address'].iloc[0]
-                alerts.append({
-                    'type': '🔧 High Repair Costs',
-                    'property': prop,
-                    'message': f"Repairs: ${row['repairs']:,.2f}"
-                })
+        for _, row in agg.iterrows():
+            if row['income'] > 0:
+                opex_ratio = row['opex'] / row['income']
+                noi_margin = row['noi'] / row['income']
+                if opex_ratio > 0.3:
+                    alerts.append({'Alert': '⚠️ High operating-expense ratio',
+                                   'Property': row['address'],
+                                   'Detail': f"{opex_ratio*100:.0f}% of income over {row['months']} month(s)"})
+                if noi_margin < 0.5:
+                    alerts.append({'Alert': '⚠️ Low NOI margin',
+                                   'Property': row['address'],
+                                   'Detail': f"{noi_margin*100:.0f}% over {row['months']} month(s)"})
+            else:
+                alerts.append({'Alert': '🏚️ No income',
+                               'Property': row['address'],
+                               'Detail': f"$0 income, {money(row['opex'])} expenses over {row['months']} month(s)"})
+            if row['repairs'] > 500 * row['months']:
+                alerts.append({'Alert': '🔧 High repair costs',
+                               'Property': row['address'],
+                               'Detail': f"{money(row['repairs'])} over {row['months']} month(s)"})
 
         if alerts:
-            alerts_df = pd.DataFrame(alerts)
-            st.dataframe(alerts_df, use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(alerts), width='stretch', hide_index=True)
         else:
-            st.success("✅ No alerts - all properties performing well!")
+            st.success(f"✅ No alerts for {period_label}.")
 
     st.markdown("---")
 
-    # Export
+    # ---- Export ------------------------------------------------------------
     st.header("⬇️ Export")
 
     col1, col2 = st.columns(2)
-
     with col1:
-        if not filtered_pm.empty and not data['monthly_reports'].empty:
-            export_pm = filtered_pm.merge(
-                data['monthly_reports'][['id', 'period_start', 'period_end']],
-                left_on='monthly_report_id', right_on='id',
-                suffixes=('', '_report')
-            ).merge(
-                data['properties'][['id', 'address']],
-                left_on='property_id', right_on='id',
-                suffixes=('', '_prop')
-            )[['address', 'period_start', 'period_end', 'total_income',
-               'total_expenses', 'mgmt_fees', 'repairs', 'noi',
-               'noi_margin', 'expense_ratio']]
+        if not in_period.empty:
+            out = in_period[['address', 'owner', 'period_start', 'period_end',
+                             'income', 'mgmt_fees', 'opex', 'expenses',
+                             'repairs', 'noi']].copy()
+            out['period_start'] = out['period_start'].dt.date
+            out['period_end'] = out['period_end'].dt.date
             st.download_button(
                 "Property months (CSV)",
-                export_pm.to_csv(index=False).encode('utf-8'),
+                out.to_csv(index=False).encode('utf-8'),
                 file_name=f"property_months_{datetime.now():%Y%m%d}.csv",
-                mime="text/csv",
-            )
-
+                mime="text/csv")
     with col2:
-        if not data['expenses'].empty and not filtered_pm.empty:
-            export_exp = data['expenses'][
-                data['expenses']['property_month_id'].isin(filtered_pm['id'])
-            ][['date', 'vendor', 'description', 'amount', 'category']]
+        if not exp.empty and not in_period.empty:
+            out_e = exp[exp['pm_id'].isin(in_period['pm_id'])][
+                ['date', 'vendor', 'description', 'amount', 'category']]
             st.download_button(
                 "Expense line items (CSV)",
-                export_exp.to_csv(index=False).encode('utf-8'),
+                out_e.to_csv(index=False).encode('utf-8'),
                 file_name=f"expenses_{datetime.now():%Y%m%d}.csv",
-                mime="text/csv",
-            )
+                mime="text/csv")
 
-    # Footer
     st.markdown("---")
-    st.caption(f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    st.caption(f"Period: {period_label} · Last updated: {datetime.now():%Y-%m-%d %H:%M:%S}")
 
 
 if __name__ == "__main__":

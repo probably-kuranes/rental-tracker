@@ -5,6 +5,7 @@ Takes parsed PDF data and writes it to the database.
 Handles deduplication, owner/property lookup, and transaction management.
 """
 
+import re
 from datetime import datetime
 from typing import Optional
 
@@ -98,9 +99,13 @@ class DataLoader:
         current_rent: float = 0,
         security_deposit: float = 0
     ) -> Property:
-        """Get existing property or create new one."""
+        """Get existing property or create new one.
+
+        Matched by address alone: statements for this family portfolio are
+        sometimes addressed to different family members, and matching on
+        (owner, address) forked duplicate property records.
+        """
         prop = session.query(Property).filter(
-            Property.owner_id == owner.id,
             Property.address == address
         ).first()
         
@@ -219,6 +224,10 @@ class DataLoader:
                     address = prop_data.get('address')
                     if not address:
                         continue
+                    # Normalize unit suffixes some statement layouts append
+                    # ("3403 Ladue St_1") so they don't create duplicate
+                    # property records.
+                    address = re.sub(r'_\d+$', '', address).strip()
                     
                     prop = self._get_or_create_property(
                         session,

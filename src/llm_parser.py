@@ -64,8 +64,18 @@ Return ONLY valid JSON (no markdown fences, no commentary) with this structure:
     ]
 }
 
-Use 0 for financial values you cannot find. If this is not a rental owner
+Use 0 for financial values you cannot find. Use the street address as written
+but omit trailing unit suffixes like "_1". If the document repeats the same
+statement more than once, extract it only once. If this is not a rental owner
 statement at all, return {"owners": []}."""
+
+
+def _text_of(message) -> str:
+    """First text block of a response (skips thinking blocks)."""
+    for block in message.content:
+        if block.type == 'text':
+            return block.text
+    raise LLMParserError("No text block in model response")
 
 
 class LLMParser:
@@ -128,9 +138,19 @@ class LLMParser:
         except anthropic.APIError as e:
             raise LLMParserError(f"API call failed: {e}")
 
-        result = self._parse_response(message.content[0].text)
+        result = self._parse_response(_text_of(message))
         result['source_file'] = str(pdf_path)
         result.setdefault('owners', [])
+        # Statement PDFs often repeat the same statement addressed to
+        # different family members; keep the non-David copy (same rule as
+        # pdf_parser.parse_pdf).
+        if len(result['owners']) > 1:
+            names = [o.get('owner_name') for o in result['owners']]
+            if 'David Mascari' in names:
+                result['owners'] = [
+                    o for o in result['owners']
+                    if o.get('owner_name') != 'David Mascari'
+                ]
         result['document_type'] = (
             'owner_statement' if result['owners'] else 'other'
         )
@@ -179,7 +199,7 @@ Respond with ONLY valid JSON (no markdown, no explanation):
                 max_tokens=256,
                 messages=[{"role": "user", "content": prompt}],
             )
-            return self._parse_response(message.content[0].text.strip())
+            return self._parse_response(_text_of(message).strip())
         except anthropic.APIError as e:
             raise LLMParserError(f"API call failed: {e}")
         except Exception as e:
@@ -211,7 +231,7 @@ Provide ONLY the summary, no quotes or explanation."""
                 max_tokens=100,
                 messages=[{"role": "user", "content": prompt}],
             )
-            return message.content[0].text.strip()
+            return _text_of(message).strip()
         except anthropic.APIError as e:
             raise LLMParserError(f"API call failed: {e}")
         except Exception as e:

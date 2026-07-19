@@ -80,7 +80,10 @@ class Classifier:
         if self.enable_llm:
             try:
                 result = self.llm_parser.parse_document(pdf_path)
-                doc_type = DocumentType(result.get('document_type', 'unknown'))
+                try:
+                    doc_type = DocumentType(result.get('document_type', 'unknown'))
+                except ValueError:
+                    doc_type = DocumentType.UNKNOWN
                 confidence = result.get('confidence', 0.5)
                 return (doc_type, confidence)
             except (LLMParserError, NotImplementedError):
@@ -169,11 +172,26 @@ class Classifier:
             ParserError: If parsing fails
         """
         doc_type, confidence = self.classify_pdf(pdf_path)
-        
+
         if doc_type == DocumentType.OWNER_STATEMENT and confidence > 0.8:
             # Use deterministic parser for known formats
-            return parse_pdf(pdf_path)
-        
+            result = parse_pdf(pdf_path)
+            # Non-standard layouts (e.g. annual statements) can pass the
+            # header check but yield no recognizable property pages; retry
+            # with the LLM parser so the per-property detail isn't lost.
+            no_properties = result.get('owners') and not any(
+                o.get('properties') for o in result['owners']
+            )
+            if no_properties and self.enable_llm:
+                try:
+                    llm_result = self.llm_parser.parse_document(pdf_path)
+                    if any(o.get('properties') for o in llm_result.get('owners', [])):
+                        return llm_result
+                except Exception:
+                    # Fall back to the deterministic (portfolio-only) result
+                    pass
+            return result
+
         elif self.enable_llm:
             # Fall back to LLM parser
             return self.llm_parser.parse_document(pdf_path)
