@@ -39,3 +39,5 @@ rental_tracker.db
 # OS
 .DS_Store
 Thumbs.db
+.venv.nosync/
+.venv
