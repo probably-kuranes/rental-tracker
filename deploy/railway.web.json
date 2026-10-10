@@ -1,0 +1,10 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": { "builder": "DOCKERFILE", "dockerfilePath": "Dockerfile.v2", "watchPatterns": ["tracker/**", "requirements.txt", "Dockerfile.v2"] },
+  "deploy": {
+    "startCommand": "python -m tracker.cli serve",
+    "healthcheckPath": "/healthz",
+    "healthcheckTimeout": 120,
+    "restartPolicyType": "ON_FAILURE"
+  }
+}

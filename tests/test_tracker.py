@@ -64,7 +64,7 @@ Total                                                                           
 
 @pytest.fixture
 def database(tmp_path, monkeypatch):
-    monkeypatch.setenv('BLOB_DIR', str(tmp_path / 'blobs'))
+    monkeypatch.delenv('BLOB_DIR', raising=False)
     db.reset_engine(f"sqlite:///{tmp_path / 'test.db'}")
     yield
     db.reset_engine()

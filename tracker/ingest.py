@@ -48,7 +48,7 @@ def ingest_pdf_bytes(data: bytes, filename: str, source: str, source_ref: str = 
         existing = s.scalar(select(db.Document).where(db.Document.sha256 == digest))
         if existing is not None:
             return existing
-        store().put(digest, data)
+        store().put(digest, data, session=s)
         doc = db.Document(sha256=digest, filename=filename, source=source, source_ref=source_ref,
                           received_at=received_at, size=len(data), status='error', parser_version=PARSER_VERSION)
         s.add(doc)

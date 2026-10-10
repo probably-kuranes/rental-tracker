@@ -11,7 +11,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from threading import Lock
 
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
@@ -38,7 +38,8 @@ def require_login(creds: HTTPBasicCredentials | None = Depends(security)):
         raise HTTPException(401, headers={'WWW-Authenticate': 'Basic realm="Rental Tracker"'})
 
 
-app = FastAPI(title='Rental Tracker', dependencies=[Depends(require_login)])
+app = FastAPI(title='Rental Tracker')
+api = APIRouter(dependencies=[Depends(require_login)])
 
 _cache = {'key': None, 'world': None}
 _lock = Lock()
@@ -61,22 +62,22 @@ def today() -> date:
     return date.fromisoformat(override) if override else date.today()
 
 
-@app.get('/api/status')
+@api.get('/api/status')
 def api_status():
     return views.status(world(), today())
 
 
-@app.get('/api/timeline')
+@api.get('/api/timeline')
 def api_timeline():
     return views.timeline(world(), today())
 
 
-@app.get('/api/analytics')
+@api.get('/api/analytics')
 def api_analytics():
     return views.analytics(world())
 
 
-@app.get('/api/summary')
+@api.get('/api/summary')
 def api_summary(month: str | None = None, audience: str = 'owner', refresh: bool = False):
     if audience not in ('owner', 'family'):
         raise HTTPException(400, 'audience must be owner or family')
@@ -86,7 +87,7 @@ def api_summary(month: str | None = None, audience: str = 'owner', refresh: bool
     return views.summary(world(), month, audience, refresh)
 
 
-@app.get('/api/documents')
+@api.get('/api/documents')
 def api_documents():
     with db.session() as s:
         docs = s.scalars(select(db.Document).order_by(db.Document.id.desc()))
@@ -97,7 +98,7 @@ def api_documents():
                                 for st in d.statements]} for d in docs]
 
 
-@app.get('/api/statements/{statement_id}/pdf')
+@api.get('/api/statements/{statement_id}/pdf')
 def api_statement_pdf(statement_id: int):
     with db.session() as s:
         st = s.get(db.Statement, statement_id)
@@ -108,7 +109,7 @@ def api_statement_pdf(statement_id: int):
                     headers={'Content-Disposition': 'inline; filename="statement.pdf"'})
 
 
-@app.post('/api/upload')
+@api.post('/api/upload')
 async def api_upload(file: UploadFile = File(...)):
     data = await file.read()
     if not data.startswith(b'%PDF'):
@@ -117,7 +118,7 @@ async def api_upload(file: UploadFile = File(...)):
     return {'id': doc.id, 'status': doc.status, 'problems': doc.problems}
 
 
-@app.get('/api/emails')
+@api.get('/api/emails')
 def api_emails(limit: int = 100):
     with db.session() as s:
         rows = s.scalars(select(db.Email).order_by(db.Email.date.desc()).limit(limit))
@@ -125,9 +126,18 @@ def api_emails(limit: int = 100):
                  'status': e.status, 'summary': e.summary, 'portfolio': e.portfolio} for e in rows]
 
 
-@app.get('/')
+@api.get('/')
 def index():
     return FileResponse(WEB / 'index.html')
 
 
+@app.get('/healthz')
+def healthz():
+    """Unauthenticated liveness check for Railway."""
+    with db.session() as s:
+        s.scalar(select(func.count(db.Statement.id)))
+    return {'ok': True}
+
+
+app.include_router(api)
 app.mount('/static', StaticFiles(directory=WEB), name='static')

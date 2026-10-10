@@ -10,5 +10,5 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY tracker/ ./tracker/
 
-ENV PYTHONUNBUFFERED=1 BLOB_DIR=/data/documents
+ENV PYTHONUNBUFFERED=1
 CMD ["python", "-m", "tracker.cli", "serve"]

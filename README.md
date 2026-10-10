@@ -61,23 +61,30 @@ pytest tests/test_tracker.py
 
 ### Deploy on Railway
 
-Two new services from this repo, using `Dockerfile.v2`
-(set `RAILWAY_DOCKERFILE_PATH=Dockerfile.v2` on each), and a new Postgres
-database:
+Three new pieces in the existing Railway project; nothing in v1 changes.
+Each service reads its settings from a config file in `deploy/`
+(Settings → Config-as-code → file path), so no build or start commands
+need typing in.
 
-| Service | Command | Notes |
+| Service | Config file | What it does |
 |---|---|---|
-| `tracker-web` | default (`python -m tracker.cli serve`) | Attach a volume at `/data` for the PDFs |
-| `tracker-mail` | `python -m tracker.cli mail` on a daily cron | Same volume and variables |
+| `tracker-db` | (Postgres database) | All data, including the original PDFs |
+| `tracker-web` | `deploy/railway.web.json` | The web app; generate a public domain for it |
+| `tracker-mail` | `deploy/railway.mail.json` | Reads Mid South's emails daily at 13:15 UTC |
 
-| Variable | Used by | Notes |
+Both app services deploy from this branch and need these variables:
+
+| Variable | Service | Notes |
 |---|---|---|
-| `DATABASE_URL` | both | The new Postgres |
-| `APP_PASSWORD`, `APP_USER` | web | HTTP Basic login (user defaults to `david`) |
-| `GMAIL_USER`, `GMAIL_APP_PASSWORD` | mail | mascariproperties@gmail.com and its app password (same as v1) |
-| `MAIL_SINCE` | mail | Earliest mail to read, Gmail date syntax (default `2026/01/01`) |
-| `ANTHROPIC_API_KEY` | both | Reading update emails, writing the monthly letter (Claude Opus 5.5) |
-| `BLOB_DIR` | both | PDF store, default `/data/documents`; or `BLOB_BUCKET` + `BLOB_ENDPOINT_URL` + AWS keys for S3 / R2 |
+| `DATABASE_URL` | both | `${{tracker-db.DATABASE_URL}}` |
+| `ANTHROPIC_API_KEY` | both | Reading update emails, writing the monthly letter |
+| `APP_PASSWORD` | web | Login password (user name `david`, or set `APP_USER`) |
+| `GMAIL_USER`, `GMAIL_APP_PASSWORD` | mail | mascariproperties@gmail.com and its app password (copy from the v1 cron service) |
+| `MAIL_SINCE` | mail | Earliest mail to read, e.g. `2025/01/01` for the first run |
+
+PDFs are stored in Postgres by default because Railway volumes cannot be
+shared between services. Set `BLOB_BUCKET` (+ `BLOB_ENDPOINT_URL` and AWS keys)
+to use S3 / Cloudflare R2 instead.
 
 **Backfill:** download the Drive statements folder and upload every PDF on the
 Documents page (multi-select works), then run the mail job once with

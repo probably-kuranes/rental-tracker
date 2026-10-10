@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 from datetime import datetime
 
-from sqlalchemy import (Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text,
+from sqlalchemy import (Boolean, Date, DateTime, ForeignKey, Integer, LargeBinary, Numeric, String, Text,
                         UniqueConstraint, create_engine)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 
@@ -140,6 +140,13 @@ class Event(Base):
     amount = mapped_column(Money, nullable=True)
     source_type: Mapped[str] = mapped_column(String(20))   # ledger | statement | email | manual
     source_id: Mapped[int | None] = mapped_column(Integer)
+
+
+class Blob(Base):
+    """Original PDF bytes (the default store; see tracker.storage)."""
+    __tablename__ = 'blobs'
+    sha256: Mapped[str] = mapped_column(String(64), primary_key=True)
+    data: Mapped[bytes] = mapped_column(LargeBinary)
 
 
 class Summary(Base):
