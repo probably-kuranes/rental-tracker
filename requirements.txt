@@ -13,7 +13,13 @@ requests>=2.31.0
 python-dotenv>=1.0.0
 
 # Claude API (email classification, digest synopses, LLM PDF fallback)
-anthropic>=0.39.0
+anthropic>=1.13.0
+
+# Web app (tracker v2)
+fastapi>=0.110
+uvicorn>=0.29
+python-multipart>=0.0.9
+# boto3  # only if BLOB_BUCKET (S3 / Cloudflare R2) is used for PDF storage
 
 # Testing
 pytest>=7.4.0

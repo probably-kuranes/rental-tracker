@@ -1,4 +1,91 @@
-# 🏠 Rental Property Tracker
+# 🏠 Rental Tracker
+
+> **v2 is in `tracker/`** (this section). The v1 pipeline and Streamlit
+> dashboard (`src/`, `scripts/`, `dashboard.py`) are documented further down and
+> still run in production until v2 is deployed.
+
+## Rental Tracker v2
+
+Every Mid South owner statement is broken down to its individual ledger lines
+(rent receipts with the tenant's ledger key, returned payments, late fees,
+bills with vendor and description). Tenancies, vacancies, late and missing
+rent, repairs, make-readies, evictions, rent changes, balances and payouts are
+worked out from those lines, and Mid South's update emails (thefts, vandalism,
+new leases, repairs) are read by Claude and added to the same timeline.
+
+**Screens:** Status board (each house now, plus each portfolio's balance with
+Mid South), Timeline (every house over any period; markers link to the
+statement PDF), Analytics (by portfolio and by house, by year), Monthly
+summary (a letter written by Claude; the "Family version: Torgo" covers only
+the Torgo houses), and Documents (every PDF and email received, and whether it
+reconciled; upload PDFs here).
+
+### How it works
+
+```
+mascariproperties@gmail.com ──IMAP──▶ tracker.mailbox ──┬─ statement PDFs ──▶ tracker.ingest ──▶ parse + reconcile
+   (labels RentalTracker/Processed,                      ├─ published / deposit notices (recorded)
+    RentalTracker/NeedsReview)                           └─ update emails ──▶ Claude ──▶ events
+Uploads / folders ─────────────────────────────────────────────▶ tracker.ingest
+                                                                         │
+Postgres: documents, statements, ledger_lines, emails, events ◀──────────┘
+        │
+tracker.derive (tenancies, events, balances, payouts; recomputed on demand)
+        │
+tracker.app (FastAPI JSON API + tracker/web single-page UI, behind a password)
+```
+
+- **Parsers** (`tracker/parsing/`): `detail.py` reads "Owner Statement Detail
+  By Building" (every monthly statement, and annual statements from 2018);
+  `summary.py` reads the 2013-2017 "Property Summary" annuals. A statement is
+  *reconciled* when its lines add up to the printed totals and its balance rolls
+  forward; anything that does not is flagged on the Documents page.
+- **Duplicates**: a PDF is stored once by content hash; a statement is loaded
+  once however many copies of it arrive; a transaction on both a monthly and an
+  annual statement counts once.
+- **Portfolio** is decided by the properties on a statement, not the printed
+  name (Torgo's statements say "Walter Mascari - T"); see `tracker/portfolios.py`.
+- **Gaps** in the statements are shown as gaps ("no statements"), never as
+  vacancies, and a move-out is only stated when the statements around it exist.
+
+### Run locally
+
+```bash
+pip install -r requirements.txt          # and poppler (pdftotext)
+export ALLOW_NO_AUTH=1                    # local only; production needs APP_PASSWORD
+python -m tracker.cli ingest ~/Downloads/statements    # load every PDF in a folder
+python -m tracker.cli check               # list anything that did not reconcile
+python -m tracker.cli serve               # http://localhost:8000
+pytest tests/test_tracker.py
+```
+
+### Deploy on Railway
+
+Two new services from this repo, using `Dockerfile.v2`
+(set `RAILWAY_DOCKERFILE_PATH=Dockerfile.v2` on each), and a new Postgres
+database:
+
+| Service | Command | Notes |
+|---|---|---|
+| `tracker-web` | default (`python -m tracker.cli serve`) | Attach a volume at `/data` for the PDFs |
+| `tracker-mail` | `python -m tracker.cli mail` on a daily cron | Same volume and variables |
+
+| Variable | Used by | Notes |
+|---|---|---|
+| `DATABASE_URL` | both | The new Postgres |
+| `APP_PASSWORD`, `APP_USER` | web | HTTP Basic login (user defaults to `david`) |
+| `GMAIL_USER`, `GMAIL_APP_PASSWORD` | mail | mascariproperties@gmail.com and its app password (same as v1) |
+| `MAIL_SINCE` | mail | Earliest mail to read, Gmail date syntax (default `2026/01/01`) |
+| `ANTHROPIC_API_KEY` | both | Reading update emails, writing the monthly letter (Claude Opus 5.5) |
+| `BLOB_DIR` | both | PDF store, default `/data/documents`; or `BLOB_BUCKET` + `BLOB_ENDPOINT_URL` + AWS keys for S3 / R2 |
+
+**Backfill:** download the Drive statements folder and upload every PDF on the
+Documents page (multi-select works), then run the mail job once with
+`python -m tracker.cli mail --since 2025/01/01`.
+
+---
+
+## v1: Rental Property Tracker
 
 Automated system for monitoring rental property owner statements from Mid South Best Rentals. Reads the `mascariproperties@gmail.com` mailbox over IMAP, parses PDF statements, stores financial data in PostgreSQL, serves an interactive Streamlit dashboard, and emails a daily digest of everything else that lands in the inbox.
 

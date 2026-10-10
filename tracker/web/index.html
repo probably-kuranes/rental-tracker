@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rental Tracker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Serif:wght@400;500&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">Rental Tracker</div>
+  <nav aria-label="Views">
+    <a href="#status" data-view="status">Status</a>
+    <a href="#timeline" data-view="timeline">Timeline</a>
+    <a href="#analytics" data-view="analytics">Analytics</a>
+    <a href="#summary" data-view="summary">Monthly summary</a>
+    <a href="#documents" data-view="documents">Documents</a>
+  </nav>
+</header>
+<main id="view" class="page" aria-live="polite"></main>
+<script src="/static/app.js"></script>
+</body>
+</html>

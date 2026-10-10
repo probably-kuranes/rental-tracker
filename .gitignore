@@ -35,6 +35,7 @@ downloads/
 *.pdf
 *.xlsx
 rental_tracker.db
+data/
 
 # OS
 .DS_Store

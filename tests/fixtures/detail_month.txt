@@ -1,0 +1,119 @@
+Mid South Best Rentals,LLC
+46 N. Flicker Street
+Memphis , TN 38104
+ph. (901) 274-5207 fax (901) 881-4027
+www.midsouthbestrentals.com
+
+
+
+
+Jane Owner                                OWNER STATEMENT
+1 Main St                                 Report Period: 08/01/2025 - 08/31/2025
+Springfield
+
+
+
+
+Portfolio Summary
+
+Previous Balance                                                                   $1,000.00
+Income                                                                      +      $1,887.50
+Expenses                                                                    -        $342.49
+     Mgmt Fees                                                              -        $190.00
+Total                                                                              $2,355.01
+     Contributions                                                          +          $0.00
+     Draws                                                                  -      -$1,000.00
+Ending Balance                                                                     $1,355.01
+Portfolio Minimum                                                           -          $0.00
+Unpaid Bills                                                                -          $0.00
+Due To Owner                                                                       $1,355.01
+
+
+
+
+  Generated 09/05/2025, 2:14 PM                                                         Page 1
+3642 Windermere
+Current                  Security
+Rent: $900.00            Deposit: $350.00
+
+Income
+Type                                Date    Name                           Comments           Paid Amount
+Convenience Fee
+                                                                           Returned Payment
+  Journal Entry                   08/05/2025 3642WINDERME:Doe, J._1                                -$3.00
+                                                                           Adjustment
+Total Convenience Fee                                                                              -$3.00
+Late Fee
+                                                                           Returned Payment
+  Journal Entry                   08/05/2025 3642WINDERME:Doe, J._1                               -$97.50
+                                                                           Adjustment
+  Charge                          08/27/2025 3642WINDERME:Doe, J._1                                $25.00
+  Charge                          08/27/2025 3642WINDERME:Doe, J._1                                $60.00
+Total Late Fee                                                                                    -$12.50
+Rent
+                                                                           Returned Payment
+  Journal Entry                   08/05/2025 3642WINDERME:Doe, J._1                               -$900.00
+                                                                           Adjustment
+  Charge                          08/02/2025 3642WINDERME:Doe, J._1                                $900.00
+                                                                           RentMoney - Jane
+  Charge                          08/27/2025 3642WINDERME:Doe, J._1                               $900.00
+                                                                           Doe
+Total Rent                                                                                        $900.00
+Total Income for 3642 Windermere                                                                  $884.50
+
+
+Expenses
+Type                                Date    Name                           Comments           Paid Amount
+Management Fees
+  Bill                            08/31/2025 Mid South Best Rentals                               $90.00
+Total Management Fees                                                                             $90.00
+Total Expenses for 3642 Windermere                                                                $90.00
+
+
+Net Operating Income                                                                             $794.50
+
+
+Total Net Income                                                                                 $794.50
+
+
+
+
+  Generated 09/05/2025, 2:14 PM                                                                      Page 2
+3403 Ladue St
+Current                  Security
+Rent: $1,000.00          Deposit: $500.00
+
+Income
+Type                                    Date    Name                           Comments                     Paid Amount
+Rent
+                                                                               PREPAY Applied to
+  Charge                             08/01/2025 3403LADUEST:Roe, R._1                                          $100.00
+                                                                               Charges
+
+
+  Generated 09/05/2025, 2:14 PM                                                                      Page 3
+  Charge                             08/01/2025 3403LADUEST:Roe, R._1                                          $903.00
+Total Rent                                                                                                    $1,003.00
+Total Income for 3403 Ladue St                                                                                $1,003.00
+
+
+Expenses
+Type                                    Date    Name                           Comments                     Paid Amount
+Management Fees
+  Bill                               08/31/2025 Mid South Best Rentals                                         $100.00
+Total Management Fees                                                                                         $100.00
+Repairs - Get Ready
+                                                                               Get Ready Invoice
+  Bill                               08/18/2025 Midsouth Renovations                                           $342.49
+
+Total Repairs - Get Ready                                                                                     $342.49
+Total Expenses for 3403 Ladue St                                                                              $442.49
+
+
+Net Operating Income                                                                                          $560.51
+
+
+Total Net Income                                                                                              $560.51
+Unpaid Bills
+Vendor                        Bill Date   Location   Comments   Amount    Due
+Total Amount Due (Not including Credits)                                                                        $0.00
