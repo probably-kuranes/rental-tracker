@@ -61,25 +61,25 @@ pytest tests/test_tracker.py
 
 ### Deploy on Railway
 
-Three new pieces in the existing Railway project; nothing in v1 changes.
-Each service reads its settings from a config file in `deploy/`
-(Settings → Config-as-code → file path), so no build or start commands
-need typing in.
+Three new services in the existing `rental-tracker` Railway project; nothing
+in v1 changes. Both app services deploy from this branch on every push and
+build with `Dockerfile.v2`. Railway no longer accepts config-as-code files,
+so these settings live on each service (Settings tab):
 
-| Service | Config file | What it does |
-|---|---|---|
-| `tracker-db` | (Postgres database) | All data, including the original PDFs |
-| `tracker-web` | `deploy/railway.web.json` | The web app; generate a public domain for it |
-| `tracker-mail` | `deploy/railway.mail.json` | Reads Mid South's emails daily at 13:15 UTC |
+| Service | Start command | Other settings | What it does |
+|---|---|---|---|
+| `tracker-db` | (Postgres template) | | All data, including the original PDFs |
+| `tracker-web` | `python -m tracker.cli serve` | Healthcheck `/healthz`; public domain | The web app |
+| `tracker-mail` | `python -m tracker.cli mail` | Cron `15 13 * * *`, restart never | Reads Mid South's emails daily at 13:15 UTC |
 
 Both app services deploy from this branch and need these variables:
 
 | Variable | Service | Notes |
 |---|---|---|
 | `DATABASE_URL` | both | `${{tracker-db.DATABASE_URL}}` |
-| `ANTHROPIC_API_KEY` | both | Reading update emails, writing the monthly letter |
+| `ANTHROPIC_API_KEY` | both | `${{rental-tracker-cron.ANTHROPIC_API_KEY}}` |
 | `APP_PASSWORD` | web | Login password (user name `david`, or set `APP_USER`) |
-| `GMAIL_USER`, `GMAIL_APP_PASSWORD` | mail | mascariproperties@gmail.com and its app password (copy from the v1 cron service) |
+| `GMAIL_USER`, `GMAIL_APP_PASSWORD` | mail | `${{rental-tracker-cron.GMAIL_USER}}` and `${{rental-tracker-cron.GMAIL_APP_PASSWORD}}` |
 | `MAIL_SINCE` | mail | Earliest mail to read, e.g. `2025/01/01` for the first run |
 
 PDFs are stored in Postgres by default because Railway volumes cannot be

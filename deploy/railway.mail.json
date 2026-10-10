@@ -1,9 +1,0 @@
-{
-  "$schema": "https://railway.com/railway.schema.json",
-  "build": { "builder": "DOCKERFILE", "dockerfilePath": "Dockerfile.v2", "watchPatterns": ["tracker/**", "requirements.txt", "Dockerfile.v2"] },
-  "deploy": {
-    "startCommand": "python -m tracker.cli mail",
-    "cronSchedule": "15 13 * * *",
-    "restartPolicyType": "NEVER"
-  }
-}
