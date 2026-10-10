@@ -169,8 +169,10 @@ class Property(Base):
 
 def database_url() -> str:
     url = os.getenv('DATABASE_URL', 'sqlite:///data/tracker.db')
-    if url.startswith('postgres://'):
-        url = 'postgresql://' + url[len('postgres://'):]
+    # SQLAlchemy 2.1 defaults postgresql:// to psycopg 3; requirements ship psycopg2.
+    for prefix in ('postgres://', 'postgresql://'):
+        if url.startswith(prefix):
+            url = 'postgresql+psycopg2://' + url[len(prefix):]
     return url
 
 
