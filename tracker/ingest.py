@@ -15,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from . import db
 from .parsing import PARSER_VERSION, ParseError, parse_text
@@ -47,6 +47,9 @@ def ingest_pdf_bytes(data: bytes, filename: str, source: str, source_ref: str = 
     with db.session() as s:
         existing = s.scalar(select(db.Document).where(db.Document.sha256 == digest))
         if existing is not None:
+            if (existing.parser_version or 0) < PARSER_VERSION and existing.status != 'duplicate':
+                _reparse(s, existing, data, portfolio_hint)
+                s.commit()
             return existing
         store().put(digest, data, session=s)
         doc = db.Document(sha256=digest, filename=filename, source=source, source_ref=source_ref,
@@ -66,6 +69,24 @@ def ingest_pdf_bytes(data: bytes, filename: str, source: str, source_ref: str = 
             doc.status, doc.problems = 'error', f"{type(e).__name__}: {e}"
         s.commit()
         return doc
+
+
+def _reparse(s, doc: db.Document, data: bytes, portfolio_hint: Optional[str]) -> None:
+    """Replace a document's statements with what the current parser reads."""
+    for st in list(doc.statements):
+        s.execute(delete(db.LedgerLine).where(db.LedgerLine.statement_id == st.id))
+        s.execute(delete(db.OwnerPayment).where(db.OwnerPayment.statement_id == st.id))
+        s.delete(st)
+    s.flush()
+    doc.problems, doc.parser_version = None, PARSER_VERSION
+    try:
+        with tempfile.NamedTemporaryFile(suffix='.pdf') as tmp:
+            tmp.write(data)
+            tmp.flush()
+            _parse_into(s, doc, pdf_to_text(tmp.name), portfolio_hint)
+    except Exception as e:
+        log.exception("Failed to re-parse %s", doc.filename)
+        doc.status, doc.problems = 'error', f"{type(e).__name__}: {e}"
 
 
 def ingest_text(text: str, filename: str, source: str = 'test', portfolio_hint: Optional[str] = None) -> db.Document:

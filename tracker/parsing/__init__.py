@@ -9,7 +9,7 @@ from .model import ParsedStatement
 from .summary import is_summary_format, parse_summary_text
 from .text import ParseError, pdf_to_text
 
-PARSER_VERSION = 1
+PARSER_VERSION = 2   # 2: repeated copies in summary-format PDFs
 
 
 def detect_format(text: str) -> str:

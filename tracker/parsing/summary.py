@@ -37,7 +37,28 @@ def is_summary_format(text: str) -> bool:
 
 
 def parse_summary_text(text: str) -> List[ParsedStatement]:
+    """Parse a summary-format PDF. Some PDFs repeat the statement once per
+    recipient (e.g. the owner and the LLC); identical copies collapse to one."""
     lines = [l.replace('\f', '') for l in text.splitlines()]
+    heads = [i for i, l in enumerate(lines) if 'Owner Statement' in l]
+    starts = [max(0, i - 1) for i in heads] or [0]
+    starts[0] = 0
+    out, seen = [], set()
+    for a, b in zip(starts, starts[1:] + [len(lines)]):
+        block = lines[a:b]
+        if not PERIOD_RE.search('\n'.join(block)):
+            continue
+        st = _parse_one(block)
+        key = (st.period_start, st.period_end, st.income, st.expenses, st.draws, st.ending_balance)
+        if key not in seen:
+            seen.add(key)
+            out.append(st)
+    if not out:
+        raise ParseError("No period found in summary statement")
+    return out
+
+
+def _parse_one(lines: List[str]) -> ParsedStatement:
     flat = '\n'.join(lines)
     m = PERIOD_RE.search(flat)
     if not m:
@@ -162,4 +183,4 @@ def parse_summary_text(text: str) -> List[ParsedStatement]:
         paid = sum((p.amount for p in st.owner_payments), Decimal('0'))
         if abs(paid - st.draws) > tol:
             st.problems.append(f"owner payments {paid} != draws {st.draws}")
-    return [st]
+    return st

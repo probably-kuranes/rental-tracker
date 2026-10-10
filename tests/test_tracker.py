@@ -195,3 +195,10 @@ def test_mail_handling_without_claude(database, monkeypatch):
     assert rows['deposit_notice'].amount == Decimal('1297.75')
     assert rows['deposit_notice'].portfolio == 'torgo'
     assert rows['update'].status == 'needs_review'
+
+
+def test_summary_copies_for_two_recipients_collapse():
+    doubled = SUMMARY + '\n' + SUMMARY.replace('Jane Owner', 'Owner Properties LLC')
+    fmt, sts = parse_text(doubled)
+    assert len(sts) == 1 and sts[0].reconciled, sts[0].problems
+    assert len(sts[0].owner_payments) == 2
