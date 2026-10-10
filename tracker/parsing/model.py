@@ -14,13 +14,13 @@ class LedgerLine:
     category: str             # Rent, Late Fee, Repairs, Management Fees, ...
     txn_type: str             # Charge, Bill, Journal Entry, Check, ...
     date: date
-    name: str                 # ledger key for income ("3403LADUEST:Henderson, Q._1"), vendor for bills
+    name: str                 # ledger key for income ("3403LADUEST:Doe, J._1"), vendor for bills
     comment: str
     amount: Decimal
 
     @property
     def tenant_key(self) -> Optional[str]:
-        """Tenant part of an income ledger key ("Henderson, Q._1"), if any."""
+        """Tenant part of an income ledger key ("Doe, J._1"), if any."""
         if ':' in self.name:
             return self.name.split(':', 1)[1].strip()
         return None
