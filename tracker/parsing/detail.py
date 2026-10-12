@@ -49,8 +49,8 @@ TXN_RE = re.compile(
 )
 RENT_DEPOSIT_RE = re.compile(r'^Rent:\s*(' + AMOUNT_RE + r')(?:\s+Deposit:\s*(' + AMOUNT_RE + r'))?')
 DEPOSIT_ONLY_RE = re.compile(r'Deposit:\s*(' + AMOUNT_RE + r')')
-SECTION_WORDS = {'Income': 'income', 'Expenses': 'expense', 'Asset': 'asset', 'Assets': 'asset'}
-PROPERTY_TOTAL_RE = re.compile(r'^Total (Income|Expenses|Assets) for (.+?)\s{2,}(' + AMOUNT_RE + r')\s*$')
+SECTION_WORDS = {'Income': 'income', 'Expenses': 'expense', 'Asset': 'asset', 'Assets': 'asset', 'Equity': 'equity'}
+PROPERTY_TOTAL_RE = re.compile(r'^Total (Income|Expenses|Assets|Equity) for (.+?)\s{2,}(' + AMOUNT_RE + r')\s*$')
 CATEGORY_TOTAL_RE = re.compile(r'^Total (.+?)\s{2,}(' + AMOUNT_RE + r')\s*$')
 NOI_RE = re.compile(r'^Net Operating Income\s+(' + AMOUNT_RE + r')\s*$')
 COMPANY_LINES = ('Mid South Best Rentals', '46 N. Flicker', 'Memphis , TN', 'ph. (901)', 'www.midsouthbestrentals')
@@ -225,6 +225,8 @@ def _parse_body(lines: List[str], st: ParsedStatement) -> None:
                 prop.total_income = value
             elif kind == 'Expenses':
                 prop.total_expenses = value
+            elif kind == 'Equity':
+                pass   # owner draws; the summary block already carries them
             else:
                 prop.total_assets = value
             continue
@@ -262,7 +264,12 @@ def _parse_body(lines: List[str], st: ParsedStatement) -> None:
                     date=mdy(r.date), name=r.name, comment=comment, amount=money(r.amount)))
             else:
                 converted.append(r)
-        p.lines = converted
+        p.lines = [l for l in converted if l.section != 'equity']
+        p.draws_only = len(p.lines) < len(converted) and not p.lines
+    # Since mid-2026 a page named after the portfolio lists only the owner draw
+    # checks (Equity). It is not a house.
+    st.properties = [p for p in st.properties if not getattr(p, 'draws_only', False)
+                     and (p.lines or p.address[:1].isdigit())]
 
 
 def _reconcile(st: ParsedStatement) -> None:

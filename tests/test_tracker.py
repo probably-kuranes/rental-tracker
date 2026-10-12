@@ -202,3 +202,28 @@ def test_summary_copies_for_two_recipients_collapse():
     fmt, sts = parse_text(doubled)
     assert len(sts) == 1 and sts[0].reconciled, sts[0].problems
     assert len(sts[0].owner_payments) == 2
+
+
+def test_owner_draw_page_is_not_a_house():
+    page = """
+Example Properties LLC
+Income
+                                                                            Original
+Type                              Date    Name                                                  Paid Amount
+                                                                            Amount
+Total Income for Example Properties LLC                                                               $0.00
+Expenses
+Total Expenses for Example Properties LLC                                                                 $0.00
+Net Operating Income                                                                                      $0.00
+ Equity
+Owner Draw
+  Check                           08/09/2025 Example Properties LLC          $1,000.00               -$1,000.00
+Total Owner Draw                                                                                     -$1,000.00
+Total Equity for Example Properties LLC                                                              -$1,000.00
+
+"""
+    marker = '3642 Windermere\n'
+    text = DETAIL.replace(marker, page + marker, 1)
+    (st,) = parse_detail_text(text)
+    assert st.reconciled, st.problems
+    assert [p.address for p in st.properties] == ['3642 Windermere', '3403 Ladue St']
