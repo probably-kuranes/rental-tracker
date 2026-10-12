@@ -81,6 +81,8 @@ Both app services deploy from this branch and need these variables:
 | `APP_PASSWORD` | web | Login password (user name `david`, or set `APP_USER`) |
 | `GMAIL_USER`, `GMAIL_APP_PASSWORD` | mail | `${{rental-tracker-cron.GMAIL_USER}}` and `${{rental-tracker-cron.GMAIL_APP_PASSWORD}}` |
 | `MAIL_SINCE` | mail | Earliest mail to read, e.g. `2025/01/01` for the first run |
+| `PROCESSED_LABEL`, `REVIEW_LABEL` | mail | `Tracker/Processed`, `Tracker/NeedsReview`; must differ from v1's `RentalTracker/Processed` while v1 runs, or v2 skips mail v1 has labelled |
+| `MANAGER_SENDERS` | mail | Senders to read; includes mascari.david@gmail.com for forwarded mail |
 
 PDFs are stored in Postgres by default because Railway volumes cannot be
 shared between services. Set `BLOB_BUCKET` (+ `BLOB_ENDPOINT_URL` and AWS keys)
