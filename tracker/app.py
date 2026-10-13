@@ -126,6 +126,17 @@ def api_emails(limit: int = 100):
                  'status': e.status, 'summary': e.summary, 'portfolio': e.portfolio} for e in rows]
 
 
+@api.get('/api/emails/{email_id}')
+def api_email(email_id: int):
+    with db.session() as s:
+        e = s.get(db.Email, email_id)
+        if e is None:
+            raise HTTPException(404, 'No such email')
+        return {'id': e.id, 'date': e.date.isoformat() if e.date else None, 'sender': e.sender,
+                'recipients': e.recipients, 'subject': e.subject, 'kind': e.kind, 'status': e.status,
+                'summary': e.summary, 'portfolio': e.portfolio, 'body': e.body}
+
+
 @api.get('/')
 def index():
     return FileResponse(WEB / 'index.html')
