@@ -277,7 +277,7 @@ async function renderSummary() {
     <div class="head"><div><h1>${label}</h1><div class="sub">Written from the statements and Mid South's emails for the month.</div></div>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
         <button class="btn" id="prev" aria-label="Previous month">‹</button><button class="btn" id="next" aria-label="Next month">›</button>
-        <div class="seg" role="group" aria-label="Version">${[['owner', 'Full summary'], ['family', 'Family version: Torgo']].map(([k, l]) =>
+        <div class="seg" role="group" aria-label="Version">${[['owner', 'Full summary'], ['family', 'Family version: Torgo'], ['manager', 'Follow-up to Mid South']].map(([k, l]) =>
           `<button class="btn ${state.audience === k ? 'on' : ''}" data-aud="${k}" aria-pressed="${state.audience === k}">${l}</button>`).join('')}</div>
       </div></div>
     <div class="two"><div class="main">
@@ -285,11 +285,12 @@ async function renderSummary() {
         : `<div class="banner">${data.llm ? 'No summary written yet.' : 'Set ANTHROPIC_API_KEY to have Claude write this letter. The facts it would use:'}</div>${factsHtml}`}</article>
     </div><aside class="side">
       <section class="card" style="display:flex;flex-direction:column;gap:10px"><h2>Send</h2>
-        <div class="sub">Copy the letter into an email, or open it in your mail app.</div>
+        <div class="sub">${state.audience === 'manager' ? 'A draft to Mid South about anything odd this month. Check it, then open it in your mail app.' : 'Copy the letter into an email, or open it in your mail app.'}</div>
         <button class="btn" id="copy" ${data.text ? '' : 'disabled'}>Copy text</button>
-        <a class="btn" style="display:flex;align-items:center;justify-content:center;text-decoration:none" href="mailto:?subject=${encodeURIComponent((state.audience === 'family' ? 'Torgo houses, ' : 'Rentals, ') + label)}&body=${encodeURIComponent(data.text || '')}">Open in email</a>
+        <a class="btn" style="display:flex;align-items:center;justify-content:center;text-decoration:none" href="mailto:${state.audience === 'manager' ? 'connect@midsouthbestrentals.com' : ''}?subject=${encodeURIComponent(({ family: 'Torgo houses, ', manager: 'Questions on the statements, ' }[state.audience] || 'Rentals, ') + label)}&body=${encodeURIComponent(data.text || '')}">Open in email</a>
         <button class="btn" id="regen" ${data.llm ? '' : 'disabled'}>Rewrite</button>
       </section>
+      ${(data.facts.checks || []).length ? `<section class="card"><h2>Flagged this month</h2><ul style="margin:0;padding-left:18px;font-size:14px">${data.facts.checks.map((c) => `<li>${esc(c)}</li>`).join('')}</ul></section>` : ''}
       <section class="card"><h2>Facts used</h2><div style="font-size:14px">${factsHtml}</div></section>
     </aside></div>`;
   const shift = (n) => { const d = new Date(state.month + '-01T00:00:00'); d.setMonth(d.getMonth() + n); state.month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; renderSummary(); };

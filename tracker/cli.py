@@ -20,6 +20,7 @@ def main(argv=None):
     sub = p.add_subparsers(dest='cmd', required=True)
     i = sub.add_parser('ingest'); i.add_argument('path')
     m = sub.add_parser('mail'); m.add_argument('--since', default=None)
+    n = sub.add_parser('send-summaries'); n.add_argument('--dry-run', action='store_true')
     sub.add_parser('serve')
     sub.add_parser('check')
     args = p.parse_args(argv)
@@ -30,6 +31,11 @@ def main(argv=None):
     elif args.cmd == 'mail':
         from . import mailbox
         print(mailbox.run(args.since) if args.since else mailbox.run())
+        from . import notify
+        print(notify.run())
+    elif args.cmd == 'send-summaries':
+        from . import notify
+        print(notify.run(dry_run=args.dry_run))
     elif args.cmd == 'serve':
         import uvicorn
         uvicorn.run('tracker.app:app', host='0.0.0.0', port=int(os.getenv('PORT', '8000')))

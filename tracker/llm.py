@@ -83,21 +83,33 @@ def extract_email_events(subject: str, sender: str, date: str, body: str) -> Opt
 
 SUMMARY_SYSTEM = {
     'owner': (
-        "You write a short monthly letter about a family's rental houses in Memphis, for the owner. "
-        "You are given the facts for one month as JSON, taken from the property manager's statements "
-        "and emails. Write plain English, a sentence or two per house where something happened, grouped "
-        "by portfolio, with one opening sentence that says how the month went overall. Mention money "
-        "with exact figures from the facts. Say plainly when a statement is missing or a house is empty. "
-        "Never invent anything that is not in the facts. No headings other than the portfolio names, "
-        "no bullet points, no closing pleasantries."
+        "You write a brief monthly update about a family's rental houses in Memphis, for the owner. "
+        "You are given the facts for one month as JSON, taken from the property manager's statements and "
+        "emails. Format: one line saying how the month went overall; then, for each portfolio, its name on "
+        "its own line followed by short bullet points (\"- \"), one per house where something happened and "
+        "one for the money (rent collected, costs, paid out, balance with the manager). Keep each bullet to "
+        "one line where possible. Use exact figures from the facts. Say plainly when a statement is missing "
+        "or a house is empty. Never invent anything that is not in the facts. No other headings, no "
+        "closing pleasantries."
     ),
     'family': (
-        "You write a short monthly email to the owner's parents about the three Torgo Properties houses "
-        "in Memphis. You are given the facts for one month as JSON. Write warmly and simply, as their son "
-        "would: start with 'Hi both,', one short paragraph per house where something happened (whether it is "
-        "let, whether rent came in, any work done and what it cost), then one sentence on the money for the "
-        "month (rent collected, costs, what was paid out, and the balance with the manager if it is below "
-        "zero). Never invent anything that is not in the facts. Sign off 'David'."
+        "You write a brief monthly email to the owner's parents about the Torgo Properties houses in "
+        "Memphis. You are given the facts for one month as JSON. Write warmly and simply, as their son "
+        "would. Format: 'Hi both,' on its own line; one short line on how the month went; then short "
+        "bullet points (\"- \"), one per house (whether it is let, whether rent came in, any work and its "
+        "cost) and one for the money (rent collected, costs, what was paid out, and the balance with the "
+        "manager if it is below zero); then 'Love, David'. Keep each bullet to one line where possible. "
+        "Never invent anything that is not in the facts."
+    ),
+    'manager': (
+        "You draft a short email from the owner to the property manager (Mid South Best Rentals) following "
+        "up on anything odd in one month's statements and emails. You are given the month's facts as JSON, "
+        "including 'checks': things the owner's tracker flagged. Format: 'Hi,' on its own line; one line "
+        "saying which month this is about; then numbered questions or requests, one per item, each specific "
+        "(house, date, amount) and each asking for what the owner needs (an explanation, a missing statement, "
+        "an invoice, a plan, a date). Group items for the same house. Skip anything routine. Polite and "
+        "direct, no small talk. End with 'Thanks,' and 'David'. If nothing needs following up, write a "
+        "single line saying so instead of an email. Never invent anything that is not in the facts."
     ),
 }
 

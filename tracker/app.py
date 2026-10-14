@@ -26,15 +26,30 @@ WEB = Path(__file__).parent / 'web'
 security = HTTPBasic(auto_error=False)
 
 
+def accounts() -> dict:
+    """Logins: APP_USER / APP_PASSWORD, plus any in APP_USERS ("name:password,name2:password2")."""
+    out = {}
+    if os.getenv('APP_PASSWORD'):
+        out[os.getenv('APP_USER', 'david')] = os.environ['APP_PASSWORD']
+    for pair in os.getenv('APP_USERS', '').split(','):
+        name, _, password = pair.strip().partition(':')
+        if name and password:
+            out[name] = password
+    return out
+
+
 def require_login(creds: HTTPBasicCredentials | None = Depends(security)):
-    password = os.getenv('APP_PASSWORD')
-    if not password:
+    users = accounts()
+    if not users:
         if os.getenv('ALLOW_NO_AUTH') == '1':
             return
         raise HTTPException(503, 'APP_PASSWORD is not set')
-    user = os.getenv('APP_USER', 'david')
-    if creds is None or not (secrets.compare_digest(creds.username, user)
-                             and secrets.compare_digest(creds.password, password)):
+    ok = False
+    if creds is not None:
+        for name, password in users.items():
+            # Check every account so the time taken does not reveal which names exist.
+            ok |= secrets.compare_digest(creds.username, name) & secrets.compare_digest(creds.password, password)
+    if not ok:
         raise HTTPException(401, headers={'WWW-Authenticate': 'Basic realm="Rental Tracker"'})
 
 
@@ -79,8 +94,8 @@ def api_analytics():
 
 @api.get('/api/summary')
 def api_summary(month: str | None = None, audience: str = 'owner', refresh: bool = False):
-    if audience not in ('owner', 'family'):
-        raise HTTPException(400, 'audience must be owner or family')
+    if audience not in ('owner', 'family', 'manager'):
+        raise HTTPException(400, 'audience must be owner, family or manager')
     if month is None:
         last = date(today().year, today().month, 1) - timedelta(days=1)
         month = f"{last.year:04d}-{last.month:02d}"

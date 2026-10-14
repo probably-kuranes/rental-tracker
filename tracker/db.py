@@ -160,6 +160,17 @@ class Summary(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class SentSummary(Base):
+    """A monthly summary emailed out, so each goes once per month and recipient."""
+    __tablename__ = 'sent_summaries'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    month: Mapped[str] = mapped_column(String(7), index=True)
+    audience: Mapped[str] = mapped_column(String(20))
+    recipient: Mapped[str] = mapped_column(String(300))
+    sent_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    __table_args__ = (UniqueConstraint('month', 'audience', 'recipient'),)
+
+
 class Property(Base):
     __tablename__ = 'houses'   # not 'properties': the v1 tables may share the database
     key: Mapped[str] = mapped_column(String(60), primary_key=True)

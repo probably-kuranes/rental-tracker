@@ -83,6 +83,10 @@ Both app services deploy from this branch and need these variables:
 | `MAIL_SINCE` | mail | Earliest mail to read, e.g. `2025/01/01` for the first run |
 | `PROCESSED_LABEL`, `REVIEW_LABEL` | mail | `Tracker/Processed`, `Tracker/NeedsReview`; must differ from v1's `RentalTracker/Processed` while v1 runs, or v2 skips mail v1 has labelled |
 | `MANAGER_SENDERS` | mail | Senders to read; includes mascari.david@gmail.com for forwarded mail |
+| `APP_USERS` | web | Extra logins, `name:password,name2:password2`; every login sees everything |
+| `SUMMARY_OWNER_TO`, `SUMMARY_FAMILY_TO` | mail | Who gets the full and the Torgo summary once a month's statements are all in; unset means nothing is sent |
+| `SUMMARY_SEND_FROM` | mail | First month to email, `YYYY-MM` (default: last month) |
+| `RESEND_API_KEY`, `EMAIL_FROM` | mail | Resend delivery; to reach anyone but the Resend account's own address, `EMAIL_FROM` must be on a domain verified in Resend |
 
 PDFs are stored in Postgres by default because Railway volumes cannot be
 shared between services. Set `BLOB_BUCKET` (+ `BLOB_ENDPOINT_URL` and AWS keys)

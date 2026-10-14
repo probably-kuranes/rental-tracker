@@ -227,3 +227,44 @@ Total Equity for Example Properties LLC                                         
     (st,) = parse_detail_text(text)
     assert st.reconciled, st.problems
     assert [p.address for p in st.properties] == ['3642 Windermere', '3403 Ladue St']
+
+
+# -- logins, follow-up checks and monthly emails ----------------------------------------
+
+def test_second_login(database, monkeypatch):
+    from fastapi.testclient import TestClient
+    from tracker.app import app
+    monkeypatch.setenv('APP_PASSWORD', 'first-pass')
+    monkeypatch.setenv('APP_USERS', 'second:second-pass')
+    c = TestClient(app)
+    assert c.get('/api/emails/1', auth=('david', 'first-pass')).status_code != 401
+    assert c.get('/api/emails/1', auth=('second', 'second-pass')).status_code != 401
+    assert c.get('/api/emails/1', auth=('second', 'first-pass')).status_code == 401
+
+
+def test_follow_up_checks(database):
+    from tracker import views
+    from tracker.derive import build_world
+    from tracker.ingest import ingest_text
+    ingest_text(DETAIL, 'a.txt')
+    data = views.summary(build_world(), '2025-08', 'manager')
+    assert any('Payment returned' in c for c in data['facts']['checks'])
+
+
+def test_monthly_summaries_sent_once_when_complete(database, monkeypatch):
+    from tracker import llm, notify
+    from tracker.ingest import ingest_text
+    ingest_text(DETAIL, 'a.txt')
+    monkeypatch.setattr(llm, 'available', lambda: True)
+    monkeypatch.setattr(llm, 'write_summary', lambda facts, audience: f"{audience} letter")
+    sent = []
+    fake = lambda to, subject, text: sent.append((to, subject, text))
+
+    assert notify.run(date(2025, 9, 10), send=fake) == {'skipped': 'no recipients set'}
+    monkeypatch.setenv('SUMMARY_OWNER_TO', 'owner@example.com')
+    monkeypatch.setenv('SUMMARY_FAMILY_TO', 'family@example.com')
+    assert notify.run(date(2025, 9, 10), send=fake) == {'sent': 2}
+    assert sorted(sent) == [('family@example.com', 'Torgo houses, August 2025', 'family letter'),
+                            ('owner@example.com', 'Rentals, August 2025', 'owner letter')]
+    assert notify.run(date(2025, 9, 10), send=fake) == {}          # not sent twice
+    assert notify.run(date(2025, 10, 10), send=fake) == {}         # September not complete

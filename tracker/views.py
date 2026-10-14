@@ -281,11 +281,47 @@ def month_facts(w: World, month: str, portfolios: Optional[List[str]] = None, se
     return facts
 
 
+def month_checks(w: World, month: str, session) -> List[str]:
+    """Things in a month worth asking the manager about."""
+    y, m = map(int, month.split('-'))
+    start, end = date(y, m, 1), _month_end(y, m)
+    names = {p['key']: p['name'] for p in PORTFOLIOS}
+    checks = []
+    for pf in active_portfolios(w, end):
+        sts = [st for st in w.statements if st.portfolio == pf and st.period_start <= end and st.period_end >= start]
+        if not covered(w.coverage.get(pf, []), start, end, slack=5):
+            checks.append(f"{names[pf]}: no statement covering all of {start:%B %Y}")
+        for st in sts:
+            if st.days < 27 and st.period_end < end:
+                checks.append(f"{names[pf]}: statement for part of a month only "
+                              f"({st.period_start:%m/%d/%Y} to {st.period_end:%m/%d/%Y})")
+            if not st.reconciled:
+                checks.append(f"{names[pf]}: statement for {st.period_start:%m/%d/%Y} to {st.period_end:%m/%d/%Y} "
+                              f"does not add up ({st.problems})")
+    for e in w.events:
+        if not (start <= e.date <= end) or e.property_key not in w.properties:
+            continue
+        house = w.properties[e.property_key]['address']
+        if e.type in ('late', 'returned', 'eviction', 'legal'):
+            checks.append(f"{house}: {e.title} ({e.date:%m/%d/%Y})")
+        elif e.type in ('repair', 'make_ready', 'maintenance') and e.amount is not None and abs(e.amount) >= 500:
+            checks.append(f"{house}: {e.title}, ${abs(e.amount):,.2f} ({e.date:%m/%d/%Y})")
+    review = session.scalars(select(db.Email).where(db.Email.status == 'needs_review'))
+    for e in review:
+        if e.date and start <= e.date.date() <= end + timedelta(days=10):
+            checks.append(f"Email not understood automatically: '{e.subject}' ({e.date:%m/%d/%Y})")
+    return checks
+
+
 def summary(w: World, month: str, audience: str = 'owner', refresh: bool = False) -> dict:
     portfolios = ['torgo'] if audience == 'family' else None
     with db.session() as s:
         facts = month_facts(w, month, portfolios, session=s)
-        digest = hashlib.sha256(json.dumps(facts, sort_keys=True, default=str).encode()).hexdigest()
+        if audience == 'manager':
+            facts['checks'] = month_checks(w, month, s)
+        # The prompt is part of the key, so a change of style rewrites old letters.
+        digest = hashlib.sha256(json.dumps([facts, llm.SUMMARY_SYSTEM[audience]], sort_keys=True,
+                                           default=str).encode()).hexdigest()
         cached = s.scalar(select(db.Summary).where(db.Summary.month == month, db.Summary.audience == audience,
                                                    db.Summary.facts_hash == digest))
         text = cached.text if cached else None
