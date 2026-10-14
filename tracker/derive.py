@@ -334,7 +334,14 @@ def _build(s) -> World:
                 cur = date(cur.year + (cur.month // 12), cur.month % 12 + 1, 1)
 
     # -- email and manual events -------------------------------------------------------
-    for ev in s.scalars(select(db.Event)):
+    seen_email = set()
+    for ev in s.scalars(select(db.Event).order_by(db.Event.id)):
+        if ev.source_type == 'email':
+            # Replies quote earlier emails, so the same event can be read more than once.
+            key = (ev.property_key, ev.date, ev.type, ev.amount)
+            if key in seen_email:
+                continue
+            seen_email.add(key)
         w.events.append(TimelineEvent(ev.property_key, ev.portfolio, ev.date, ev.type, ev.title,
                                       detail=ev.detail or '', amount=ev.amount, source=f"{ev.source_type}:{ev.source_id}"))
 

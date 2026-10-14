@@ -186,11 +186,19 @@ def handle(msg: Message) -> str:
     return label
 
 
+def strip_quoted(body: str) -> str:
+    """The new part of a reply: drop '>' lines and everything after "On ... wrote:"."""
+    m = re.search(r'\n\s*On [^\n]{0,200}(\n[^\n]{0,200})?wrote:', body)
+    if m:
+        body = body[:m.start()]
+    return '\n'.join(l for l in body.splitlines() if not l.lstrip().startswith('>'))
+
+
 def _read_update(msg: Message, record: db.Email):
     if not llm.available():
         record.summary = '(not read: no ANTHROPIC_API_KEY)'
         return 'needs_review', NEEDS_REVIEW
-    result = llm.extract_email_events(msg.subject, msg.sender, msg.date.isoformat(), msg.body)
+    result = llm.extract_email_events(msg.subject, msg.sender, msg.date.isoformat(), strip_quoted(msg.body))
     if result is None:
         record.summary = '(Claude declined to read this email)'
         return 'needs_review', NEEDS_REVIEW

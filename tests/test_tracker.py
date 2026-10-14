@@ -268,3 +268,9 @@ def test_monthly_summaries_sent_once_when_complete(database, monkeypatch):
                             ('owner@example.com', 'Rentals, August 2025', 'owner letter')]
     assert notify.run(date(2025, 9, 10), send=fake) == {}          # not sent twice
     assert notify.run(date(2025, 10, 10), send=fake) == {}         # September not complete
+
+
+def test_reply_quotes_are_stripped():
+    from tracker.mailbox import strip_quoted
+    body = "Second theft: condenser stolen.\n\nOn Fri, Sep 18, 2026 at 9:30 AM Connect <c@x.com>\nwrote:\n> Water heater stolen.\n"
+    assert strip_quoted(body).strip() == 'Second theft: condenser stolen.'

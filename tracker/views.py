@@ -241,7 +241,8 @@ def month_facts(w: World, month: str, portfolios: Optional[List[str]] = None, se
         sts = [st for st in w.statements if st.portfolio == p['key'] and st.period_start <= end and st.period_end >= start]
         if not sts and not portfolios and p['key'] not in active_portfolios(w, end):
             continue
-        monthly = [st for st in sts if st.days <= 45]
+        monthly = sorted((st for st in sts if st.days <= 45),
+                         key=lambda st: not (st.period_start <= start and st.period_end >= end))
         st = monthly[0] if monthly else None
         houses = []
         keys = {k for k, info in w.properties.items() if info['portfolio'] == p['key']}
@@ -252,7 +253,7 @@ def month_facts(w: World, month: str, portfolios: Optional[List[str]] = None, se
             rec = w.month_rent.get(k, {}).get(month)
             ts = w.tenancies.get(k, [])
             live = [t for t in ts if t.start <= end and (t.end is None or t.end >= start)]
-            tenant = max(live, key=lambda t: t.start).tenant if live else None
+            tenant = max(live, key=lambda t: t.start).tenant if live else (rec or {}).get('tenant')
             houses.append({
                 'house': w.properties[k]['address'], 'tenant': tenant or 'none (vacant or unknown)',
                 'rent_received': f(rec['received']) if rec else 0.0,
@@ -261,6 +262,9 @@ def month_facts(w: World, month: str, portfolios: Optional[List[str]] = None, se
                            for e in w.events if e.property_key == k and start <= e.date <= end],
             })
         entry = {'portfolio': p['name'], 'houses': houses}
+        if st and not (st.period_start <= start and st.period_end >= end):
+            entry['statement_note'] = (f"only a part-month statement ({st.period_start:%d %b} to {st.period_end:%d %b}) "
+                                       "has these totals; a longer statement covers the whole month")
         if st:
             entry['statement'] = {'income': f(st.income), 'expenses': f(st.expenses), 'management_fees': f(st.mgmt_fees),
                                   'paid_out_to_owner': f(st.draws), 'balance_start': f(st.previous_balance),
@@ -291,8 +295,9 @@ def month_checks(w: World, month: str, session) -> List[str]:
         sts = [st for st in w.statements if st.portfolio == pf and st.period_start <= end and st.period_end >= start]
         if not covered(w.coverage.get(pf, []), start, end, slack=5):
             checks.append(f"{names[pf]}: no statement covering all of {start:%B %Y}")
+        whole = covered(w.coverage.get(pf, []), start, end, slack=5)
         for st in sts:
-            if st.days < 27 and st.period_end < end:
+            if st.days < 27 and st.period_end < end and not whole:
                 checks.append(f"{names[pf]}: statement for part of a month only "
                               f"({st.period_start:%m/%d/%Y} to {st.period_end:%m/%d/%Y})")
             if not st.reconciled:

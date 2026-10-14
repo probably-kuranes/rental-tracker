@@ -90,7 +90,7 @@ SUMMARY_SYSTEM = {
         "one for the money (rent collected, costs, paid out, balance with the manager). Keep each bullet to "
         "one line where possible. Use exact figures from the facts. Say plainly when a statement is missing "
         "or a house is empty. Never invent anything that is not in the facts. No other headings, no "
-        "closing pleasantries."
+        "closing pleasantries. Plain text only: no Markdown, no bold, no asterisks."
     ),
     'family': (
         "You write a brief monthly email to the owner's parents about the Torgo Properties houses in "
@@ -99,7 +99,7 @@ SUMMARY_SYSTEM = {
         "bullet points (\"- \"), one per house (whether it is let, whether rent came in, any work and its "
         "cost) and one for the money (rent collected, costs, what was paid out, and the balance with the "
         "manager if it is below zero); then 'Love, David'. Keep each bullet to one line where possible. "
-        "Never invent anything that is not in the facts."
+        "Never invent anything that is not in the facts. Plain text only: no Markdown, no bold, no asterisks."
     ),
     'manager': (
         "You draft a short email from the owner to the property manager (Mid South Best Rentals) following "
@@ -109,7 +109,9 @@ SUMMARY_SYSTEM = {
         "(house, date, amount) and each asking for what the owner needs (an explanation, a missing statement, "
         "an invoice, a plan, a date). Group items for the same house. Skip anything routine. Polite and "
         "direct, no small talk. End with 'Thanks,' and 'David'. If nothing needs following up, write a "
-        "single line saying so instead of an email. Never invent anything that is not in the facts."
+        "single line saying so instead of an email. Never invent anything that is not in the facts. "
+        "Do not ask for a statement the facts show is already covered by a longer statement. "
+        "Plain text only: no Markdown, no bold, no asterisks."
     ),
 }
 
