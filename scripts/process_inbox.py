@@ -4,8 +4,10 @@ Process Inbox
 
 LLM-powered email inbox processor that:
 1. Classifies unprocessed inbox emails as rental reports vs. other
-2. Routes rental reports through the existing tracker pipeline
+2. Skips rental reports (the v2 tracker-mail service ingests those)
 3. Generates synopses for other emails and emails a digest via Resend
+
+Uses no database: the v1 Postgres is retired.
 
 Usage:
     python scripts/process_inbox.py
@@ -17,7 +19,6 @@ Usage:
 import os
 import sys
 import argparse
-import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import List
@@ -29,9 +30,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from src import config, emailer
 from src.mailbox import GmailMailbox, Email
 from src.llm_parser import LLMParser, LLMParserError
-from src.classifier import Classifier
-from src.data_loader import DataLoader
-from src.database import Database
 
 
 @dataclass
@@ -137,7 +135,6 @@ def process_inbox(dry_run: bool = False, verbose: bool = False,
         'emails_fetched': 0,
         'rental_reports': 0,
         'other_emails': 0,
-        'properties_imported': 0,
         'digest_sent': False,
         'errors': []
     }
@@ -152,17 +149,9 @@ def process_inbox(dry_run: bool = False, verbose: bool = False,
     try:
         mailbox = GmailMailbox()
         llm = LLMParser()
-        enable_llm = bool(os.getenv('ANTHROPIC_API_KEY'))
-        classifier = Classifier(enable_llm=enable_llm)
-        db = Database()
-        loader = DataLoader(db)
     except Exception as e:
         stats['errors'].append(f"Initialization failed: {e}")
         return stats
-
-    # Ensure database tables exist
-    if not dry_run:
-        db.create_tables()
 
     # Fetch all unprocessed inbox emails in the window
     log(f"Fetching unprocessed inbox emails "
@@ -210,37 +199,9 @@ def process_inbox(dry_run: bool = False, verbose: bool = False,
             email_had_error = True
 
         if is_rental and confidence >= 0.7:
-            # Process as rental report
+            # Statements are ingested by the v2 tracker-mail service; leave them out of the digest
             stats['rental_reports'] += 1
-
-            if msg.has_pdf_attachment:
-                for pdf_attachment in msg.pdf_attachments:
-                    log(f"  Processing PDF: {pdf_attachment.filename}")
-
-                    with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
-                        tmp.write(pdf_attachment.data)
-                        tmp_path = tmp.name
-
-                    try:
-                        parsed_data = classifier.parse_document(tmp_path)
-
-                        if not dry_run:
-                            result = loader.load(parsed_data, email_id=msg.id)
-                            stats['properties_imported'] += result['properties_loaded']
-                            log(f"  Loaded {result['properties_loaded']} properties")
-                        else:
-                            props = sum(len(o.get('properties', [])) for o in parsed_data.get('owners', []))
-                            log(f"  [DRY RUN] Would load {props} properties")
-
-                    except Exception as e:
-                        log(f"  ERROR processing PDF: {e}")
-                        stats['errors'].append(f"PDF processing failed for '{pdf_attachment.filename}': {e}")
-                        email_had_error = True
-
-                    finally:
-                        os.unlink(tmp_path)
-            else:
-                log("  No PDF attachment found, skipping parse")
+            log("  Rental report: skipped (handled by tracker-mail)")
         else:
             # Generate synopsis for digest
             stats['other_emails'] += 1
@@ -350,7 +311,6 @@ def main():
     print(f"  Emails fetched: {stats['emails_fetched']}")
     print(f"  Rental reports processed: {stats['rental_reports']}")
     print(f"  Other emails (digest): {stats['other_emails']}")
-    print(f"  Properties imported: {stats['properties_imported']}")
     print(f"  Digest sent: {'Yes' if stats['digest_sent'] else 'No'}")
 
     if stats['errors']:

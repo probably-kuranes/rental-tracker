@@ -1,14 +1,6 @@
 #!/bin/bash
-# Daily cron entry point (Railway cron service).
-# Runs the statement ingest, then the LLM inbox digest. A failure in one
-# doesn't block the other; the exit code reflects whether anything failed.
+# Daily cron entry point (Railway rental-tracker-cron service).
+# Sends the rental inbox digest for mascariproperties@gmail.com.
+# Statement ingest moved to the v2 tracker-mail service, so it no longer runs here.
 
-status=0
-
-echo "=== Statement ingest ==="
-python3 scripts/run_agent.py --verbose || status=1
-
-echo "=== Inbox digest ==="
-python3 scripts/process_inbox.py --verbose || status=1
-
-exit $status
+exec python3 scripts/process_inbox.py --verbose
